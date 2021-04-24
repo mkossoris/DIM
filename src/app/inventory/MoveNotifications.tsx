@@ -1,16 +1,13 @@
-import React, { useEffect, useState } from 'react';
-import { DimItem } from './item-types';
-import ConnectedInventoryItem from './ConnectedInventoryItem';
-import { AppIcon, refreshIcon } from 'app/shell/icons';
-import { faExclamationCircle } from '@fortawesome/free-solid-svg-icons';
-import styles from './MoveNotifications.m.scss';
-import { faCheckCircle } from '@fortawesome/free-regular-svg-icons';
-import clsx from 'clsx';
-import { DimStore } from './store-types';
 import { t } from 'app/i18next-t';
-import { NotifyInput } from 'app/notifications/notifications';
-import _ from 'lodash';
 import { Loadout } from 'app/loadout/loadout-types';
+import { NotifyInput } from 'app/notifications/notifications';
+import { AppIcon, faCheckCircle, faExclamationCircle, refreshIcon } from 'app/shell/icons';
+import clsx from 'clsx';
+import React, { useEffect, useState } from 'react';
+import ConnectedInventoryItem from './ConnectedInventoryItem';
+import { DimItem } from './item-types';
+import styles from './MoveNotifications.m.scss';
+import { DimStore } from './store-types';
 
 /** How long to leave the notification up after it's done. */
 const lingerMs = 2000;
@@ -21,23 +18,21 @@ const lingerMs = 2000;
 export function moveItemNotification(
   item: DimItem,
   target: DimStore,
-  movePromise: Promise<any>
+  movePromise: Promise<any>,
+  cancel: () => void
 ): NotifyInput {
   return {
     promise: movePromise,
-    duration: lingerMs,
+    duration: 0,
     title: item.name,
     icon: <ConnectedInventoryItem item={item} />,
     trailer: <MoveItemNotificationIcon completion={movePromise} />,
-    /*
-      t('ItemMove.MovingItem_male')
-      t('ItemMove.MovingItem_female')
-    */
     body: t('ItemMove.MovingItem', {
       name: item.name,
       target: target.name,
-      context: target.genderName
-    })
+      context: target.genderName,
+    }),
+    onCancel: cancel,
   };
 }
 
@@ -47,11 +42,14 @@ export function moveItemNotification(
 export function loadoutNotification(
   loadout: Loadout,
   store: DimStore,
-  loadoutPromise: Promise<any>
+  loadoutPromise: Promise<any>,
+  cancel: () => void
 ): NotifyInput {
-  const count = _.sumBy(Object.values(loadout.items), (i) => i.length);
+  const count = loadout.items.length;
 
   // TODO: pass in a state updater that can communicate application state
+
+  // TODO: body! show all items, check 'em off
 
   return {
     promise: loadoutPromise,
@@ -59,14 +57,11 @@ export function loadoutNotification(
     title: t('Loadouts.NotificationTitle', { name: loadout.name }),
     trailer: <MoveItemNotificationIcon completion={loadoutPromise} />,
     body: t('Loadouts.NotificationMessage', {
-      // t('Loadouts.NotificationMessage_male')
-      // t('Loadouts.NotificationMessage_female')
-      // t('Loadouts.NotificationMessage_male_plural')
-      // t('Loadouts.NotificationMessage_female_plural')
       count,
       store: store.name,
-      context: store.genderName
-    })
+      context: store.genderName,
+    }),
+    onCancel: cancel,
   };
 }
 
@@ -76,7 +71,8 @@ export function loadoutNotification(
 export function postmasterNotification(
   count: number,
   store: DimStore,
-  promise: Promise<any>
+  promise: Promise<any>,
+  cancel: () => void
 ): NotifyInput {
   // TODO: pass in a state updater that can communicate application state
 
@@ -86,26 +82,23 @@ export function postmasterNotification(
     title: t('Loadouts.PullFromPostmasterPopupTitle'),
     trailer: <MoveItemNotificationIcon completion={promise} />,
     body: t('Loadouts.PullFromPostmasterNotification', {
-      // t('Loadouts.PullFromPostmasterNotification_male')
-      // t('Loadouts.PullFromPostmasterNotification_female')
-      // t('Loadouts.PullFromPostmasterNotification_male_plural')
-      // t('Loadouts.PullFromPostmasterNotification_female_plural')
       count,
       store: store.name,
-      context: store.genderName
-    })
+      context: store.genderName,
+    }),
+    onCancel: cancel,
   };
 }
 
 const enum MoveState {
   InProgress,
   Failed,
-  Succeeded
+  Succeeded,
 }
 
 const moveStateClasses = {
   [MoveState.Failed]: styles.failed,
-  [MoveState.Succeeded]: styles.succeeded
+  [MoveState.Succeeded]: styles.succeeded,
 };
 
 function MoveItemNotificationIcon({ completion }: { completion: Promise<any> }) {

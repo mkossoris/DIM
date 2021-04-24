@@ -2,6 +2,9 @@
 
 .progress-panel {
   margin-top: 8px;
+  @include phone-portrait {
+    margin-top: 0;
+  }
 }
 
 .progress-page {
@@ -16,16 +19,6 @@
       width: auto;
       display: flex;
       justify-content: center;
-    }
-
-    .character-box {
-      flex: 1;
-      cursor: default;
-      border-bottom: none;
-    }
-
-    &:last-child .character-box {
-      margin-right: 0;
     }
   }
 
@@ -77,8 +70,4 @@
       width: 16px;
     }
   }
-}
-
-#factions .progress-for-character {
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
 }

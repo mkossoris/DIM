@@ -1,14 +1,14 @@
+import { itemCanBeInLoadout } from 'app/utils/item-utils';
+import clsx from 'clsx';
 import React from 'react';
 import {
+  ConnectDropTarget,
   DropTarget,
-  DropTargetSpec,
   DropTargetConnector,
   DropTargetMonitor,
-  ConnectDropTarget
+  DropTargetSpec,
 } from 'react-dnd';
-import clsx from 'clsx';
 import { DimItem } from '../inventory/item-types';
-import _ from 'lodash';
 
 interface ExternalProps {
   bucketTypes: string[];
@@ -41,32 +41,28 @@ const dropSpec: DropTargetSpec<Props> = {
   canDrop(_, monitor) {
     // But equipping has requirements
     const item = monitor.getItem().item as DimItem;
-    return item.canBeInLoadout();
-  }
+    return itemCanBeInLoadout(item);
+  },
 };
 
 // This forwards drag and drop state into props on the component
 function collect(connect: DropTargetConnector, monitor: DropTargetMonitor): InternalProps {
   return {
     connectDropTarget: connect.dropTarget(),
-    isOver: monitor.isOver() && monitor.canDrop()
+    isOver: monitor.isOver() && monitor.canDrop(),
   };
 }
 
-class LoadoutDrawerDropTarget extends React.Component<Props> {
-  render() {
-    const { connectDropTarget, children, isOver } = this.props;
-
-    return connectDropTarget(
-      <div
-        className={clsx('loadout-drop', {
-          'on-drag-hover': isOver
-        })}
-      >
-        {children}
-      </div>
-    );
-  }
+function LoadoutDrawerDropTarget({ connectDropTarget, children, isOver }: Props) {
+  return connectDropTarget(
+    <div
+      className={clsx('loadout-drop', {
+        'on-drag-hover': isOver,
+      })}
+    >
+      {children}
+    </div>
+  );
 }
 
 export default DropTarget(dragType, dropSpec, collect)(LoadoutDrawerDropTarget);

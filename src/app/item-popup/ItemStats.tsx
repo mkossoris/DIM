@@ -1,22 +1,20 @@
-import React from 'react';
-import { DimItem, D1Item, DimStat } from '../inventory/item-types';
-import _ from 'lodash';
-import ItemStat, { D1QualitySummaryStat, isD1Stat } from './ItemStat';
+import { isD1Item } from 'app/utils/item-utils';
 import clsx from 'clsx';
+import React from 'react';
+import { DimItem, DimStat } from '../inventory/item-types';
+import ItemStat, { D1QualitySummaryStat, isD1Stat } from './ItemStat';
 import styles from './ItemStats.m.scss';
 
 export default function ItemStats({
   stats,
   item,
-  quality,
-  className
+  className,
 }: {
-  stats?: DimStat[];
+  stats?: DimStat[] | null;
   item?: DimItem;
-  quality?: D1Item['quality'];
   className?: string;
 }) {
-  stats = stats || item?.stats || undefined;
+  stats ||= item?.stats;
 
   if (!stats || !stats.length) {
     return null;
@@ -32,7 +30,7 @@ export default function ItemStats({
         <ItemStat key={stat.statHash} stat={stat} item={item} />
       ))}
 
-      {item?.isDestiny1() && quality?.min && <D1QualitySummaryStat item={item} />}
+      {item && isD1Item(item) && item.quality?.min && <D1QualitySummaryStat item={item} />}
     </div>
   );
 }

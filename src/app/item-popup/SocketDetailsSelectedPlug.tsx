@@ -1,28 +1,55 @@
-import React from 'react';
-import { DestinyInventoryItemDefinition } from 'bungie-api-ts/destiny2';
 import { D2ManifestDefinitions } from 'app/destiny2/d2-definitions';
-import { D2Item, DimPlug, DimStat } from 'app/inventory/item-types';
-import _ from 'lodash';
-import { interpolateStatValue } from 'app/inventory/store/stats';
 import BungieImage from 'app/dim-ui/BungieImage';
-import { StatValue } from './PlugTooltip';
+import { t } from 'app/i18next-t';
+import { insertPlug } from 'app/inventory/advanced-write-actions';
+import {
+  DimItem,
+  DimPlug,
+  DimSocket,
+  DimStat,
+  PluggableInventoryItemDefinition,
+} from 'app/inventory/item-types';
+import { interpolateStatValue } from 'app/inventory/store/stats';
+import { showNotification } from 'app/notifications/notifications';
+import { refreshIcon } from 'app/shell/icons';
+import AppIcon from 'app/shell/icons/AppIcon';
+import { useThunkDispatch } from 'app/store/thunk-dispatch';
+import { emptySpecialtySocketHashes, isPlugStatActive } from 'app/utils/item-utils';
+import { StatHashes } from 'data/d2/generated-enums';
+import { motion } from 'framer-motion';
+import _ from 'lodash';
+import React, { useState } from 'react';
 import ItemStats from './ItemStats';
-import styles from './SocketDetailsSelectedPlug.m.scss';
+import { StatValue } from './PlugTooltip';
 import { SocketDetailsMod } from './SocketDetails';
+import styles from './SocketDetailsSelectedPlug.m.scss';
 
-const costStatHashes = [3578062600, 2399985800, 3344745325, 3779394102];
+const costStatHashes = [
+  StatHashes.AnyEnergyTypeCost,
+  StatHashes.VoidCost,
+  StatHashes.SolarCost,
+  StatHashes.ArcCost,
+];
 
 export default function SocketDetailsSelectedPlug({
   plug,
+  socket,
   defs,
   item,
-  currentPlug
+  currentPlug,
+  equippable,
+  closeMenu,
 }: {
-  plug: DestinyInventoryItemDefinition;
+  plug: PluggableInventoryItemDefinition;
+  socket: DimSocket;
   defs: D2ManifestDefinitions;
-  item: D2Item;
+  item: DimItem;
   currentPlug: DimPlug | null;
+  equippable: boolean;
+  closeMenu(): void;
 }) {
+  const dispatch = useThunkDispatch();
+
   const selectedPlugPerk =
     Boolean(plug.perks?.length) && defs.SandboxPerk.get(plug.perks[0].perkHash);
 
@@ -31,7 +58,8 @@ export default function SocketDetailsSelectedPlug({
       defs.MaterialRequirementSet.get(plug.plug.insertionMaterialRequirementHash)) ||
     undefined;
 
-  const sourceString = defs.Collectible.get(plug?.collectibleHash || 0)?.sourceString;
+  const sourceString =
+    plug.collectibleHash && defs.Collectible.get(plug.collectibleHash)?.sourceString;
 
   const stats = _.compact(
     plug.investmentStats.map((stat) => {
@@ -42,58 +70,80 @@ export default function SocketDetailsSelectedPlug({
       if (!itemStat) {
         return null;
       }
-      // const statDef = defs.Stat.get(stat.statTypeHash);
       const statGroupDef = defs.StatGroup.get(
-        defs.InventoryItem.get(item.hash).stats.statGroupHash!
+        defs.InventoryItem.get(item.hash).stats!.statGroupHash!
       );
 
       const statDisplay = statGroupDef?.scaledStats.find((s) => s.statHash === stat.statTypeHash);
 
       const currentModValue = currentPlug?.stats?.[stat.statTypeHash] || 0;
 
-      const updatedInvestmentValue = itemStat.investmentValue + stat.value - currentModValue;
-      let itemStatValue = updatedInvestmentValue;
+      if (!isPlugStatActive(item, plug.hash, stat.statTypeHash, stat.isConditionallyActive)) {
+        return null;
+      }
       let modValue = stat.value;
+      const updatedInvestmentValue = itemStat.investmentValue + modValue - currentModValue;
+      let itemStatValue = updatedInvestmentValue;
+
       if (statDisplay) {
         itemStatValue = interpolateStatValue(updatedInvestmentValue, statDisplay);
         modValue =
-          itemStatValue - interpolateStatValue(updatedInvestmentValue - stat.value, statDisplay);
+          itemStatValue - interpolateStatValue(updatedInvestmentValue - modValue, statDisplay);
       }
 
       return {
         modValue,
         dimStat: {
           ...itemStat,
-          value: itemStatValue
-        } as DimStat
+          value: itemStatValue,
+        } as DimStat,
       };
     })
   );
+
+  const [insertInProgress, setInsertInProgress] = useState(false);
+  const onInsertPlug = async () => {
+    setInsertInProgress(true);
+    try {
+      await dispatch(insertPlug(item, socket, plug.hash));
+      closeMenu();
+    } catch (e) {
+      showNotification({ type: 'error', title: t('Sockets.InsertPlugError'), body: e.message });
+    } finally {
+      setInsertInProgress(false);
+    }
+  };
+
+  const costs = materialRequirementSet?.materials.map((material) => {
+    const materialDef = defs.InventoryItem.get(material.itemHash);
+    return (
+      materialDef &&
+      material.count > 0 &&
+      !material.omitFromRequirements && (
+        <div className={styles.material} key={material.itemHash}>
+          {material.count.toLocaleString()}
+          <BungieImage
+            src={materialDef.displayProperties.icon}
+            title={materialDef.displayProperties.name}
+          />
+        </div>
+      )
+    );
+  });
 
   return (
     <div className={styles.selectedPlug}>
       <div className={styles.modIcon}>
         <SocketDetailsMod itemDef={plug} defs={defs} />
-        {materialRequirementSet &&
-          materialRequirementSet.materials.map((material) => {
-            const materialDef = defs.InventoryItem.get(material.itemHash);
-            return (
-              materialDef &&
-              material.count > 0 &&
-              !material.omitFromRequirements && (
-                <div className={styles.material} key={material.itemHash}>
-                  {material.count.toLocaleString()}
-                  <BungieImage
-                    src={materialDef.displayProperties.icon}
-                    title={materialDef.displayProperties.name}
-                  />
-                </div>
-              )
-            );
-          })}
+        {!$featureFlags.awa && costs}
       </div>
       <div className={styles.modDescription}>
-        <h3>{plug.displayProperties.name}</h3>
+        <h3>
+          {plug.displayProperties.name}
+          {emptySpecialtySocketHashes.includes(plug.hash) && (
+            <> &mdash; {plug.itemTypeDisplayName}</>
+          )}
+        </h3>
         {selectedPlugPerk ? (
           <div>{selectedPlugPerk.displayProperties.description}</div>
         ) : (
@@ -109,6 +159,25 @@ export default function SocketDetailsSelectedPlug({
         ))}
       </div>
       <ItemStats stats={stats.map((s) => s.dimStat)} className={styles.itemStats} />
+      {$featureFlags.awa && (
+        <motion.button
+          layout
+          type="button"
+          className={styles.insertButton}
+          onClick={onInsertPlug}
+          disabled={!equippable || insertInProgress}
+        >
+          {insertInProgress && (
+            <motion.span layout>
+              <AppIcon icon={refreshIcon} spinning={true} />
+            </motion.span>
+          )}
+          <motion.span layout>
+            {t('Sockets.InsertModButton')}
+            {costs}
+          </motion.span>
+        </motion.button>
+      )}
     </div>
   );
 }

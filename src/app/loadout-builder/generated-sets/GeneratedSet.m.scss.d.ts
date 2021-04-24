@@ -2,11 +2,9 @@
 // Please do not change this file!
 interface CssExports {
   'build': string;
+  'container': string;
   'header': string;
   'items': string;
-  'light': string;
-  'nonActiveStat': string;
-  'statSegment': string;
 }
 export const cssExports: CssExports;
 export default cssExports;

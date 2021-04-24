@@ -1,17 +1,16 @@
+import { XurLocation } from '@d2api/d2api-types';
+import { VENDORS } from 'app/search/d2-known-values';
+import { RootState } from 'app/store/types';
+import _ from 'lodash';
 import React from 'react';
+import { useSelector } from 'react-redux';
 import { D2ManifestDefinitions } from '../destiny2/d2-definitions';
 import BungieImage from '../dim-ui/BungieImage';
-import Countdown from '../dim-ui/Countdown';
-import VendorItems from './VendorItems';
 import CollapsibleTitle from '../dim-ui/CollapsibleTitle';
+import Countdown from '../dim-ui/Countdown';
 import { D2Vendor } from './d2-vendors';
 import styles from './Vendor.m.scss';
-import _ from 'lodash';
-import { isDroppingHigh } from 'app/vendorEngramsXyzApi/vendorEngramsXyzService';
-import vendorEngramSvg from '../../images/engram.svg';
-import clsx from 'clsx';
-import { t } from 'app/i18next-t';
-import { VendorDrop } from 'app/vendorEngramsXyzApi/vendorDrops';
+import VendorItems from './VendorItems';
 
 /**
  * An individual Vendor in the "all vendors" page. Use SingleVendor for a page that only has one vendor on it.
@@ -22,7 +21,7 @@ export default function Vendor({
   ownedItemHashes,
   currencyLookups,
   filtering,
-  vendorDrops
+  characterId,
 }: {
   vendor: D2Vendor;
   defs: D2ManifestDefinitions;
@@ -31,24 +30,19 @@ export default function Vendor({
     [itemHash: number]: number;
   };
   filtering: boolean;
-  vendorDrops?: VendorDrop[];
+  characterId: string;
 }) {
-  const placeString = _.uniq(
-    [vendor.destination?.displayProperties.name, vendor.place?.displayProperties.name].filter(
-      (n) => n?.length
-    )
-  ).join(', ');
+  const xurLocation = useSelector((state: RootState) =>
+    vendor.def.hash === VENDORS.XUR ? state.vendors.xurLocation : undefined
+  );
 
-  const vendorEngramDrops =
-    $featureFlags.vendorEngrams && vendorDrops
-      ? vendorDrops.filter((vd) => vd.vendorId === vendor.def.hash)
-      : [];
-
-  const dropActive = vendorEngramDrops.some(isDroppingHigh);
-
-  const vendorLinkTitle = dropActive
-    ? t('VendorEngramsXyz.DroppingHigh')
-    : t('VendorEngramsXyz.Vote');
+  const placeString = xurLocation
+    ? extractXurLocationString(defs, xurLocation)
+    : _.uniq(
+        [vendor.destination?.displayProperties.name, vendor.place?.displayProperties.name].filter(
+          (n) => n?.length
+        )
+      ).join(', ');
 
   return (
     <div id={vendor.def.hash.toString()}>
@@ -56,18 +50,15 @@ export default function Vendor({
         className={styles.title}
         title={
           <>
-            {$featureFlags.vendorEngrams && vendorEngramDrops.length > 0 && (
-              <a target="_blank" rel="noopener noreferrer" href="https://vendorengrams.xyz/">
-                <img
-                  className={clsx(styles.xyzEngram, {
-                    [styles.xyzActiveThrob]: dropActive
-                  })}
-                  src={vendorEngramSvg}
-                  title={vendorLinkTitle}
-                />
-              </a>
-            )}
-            <BungieImage src={vendor.def.displayProperties.icon} className={styles.icon} />
+            <span className={styles.vendorIconWrapper}>
+              <BungieImage
+                src={
+                  vendor.def.displayProperties.icon ||
+                  vendor.def.displayProperties.smallTransparentIcon
+                }
+                className={styles.icon}
+              />
+            </span>
             <div className={styles.titleDetails}>
               <div>{vendor.def.displayProperties.name}</div>
               <div className={styles.location}>{placeString}</div>
@@ -85,8 +76,23 @@ export default function Vendor({
           ownedItemHashes={ownedItemHashes}
           currencyLookups={currencyLookups}
           filtering={filtering}
+          characterId={characterId}
         />
       </CollapsibleTitle>
     </div>
   );
+}
+
+function extractXurLocationString(defs: D2ManifestDefinitions, xurLocation: XurLocation) {
+  const placeDef = defs.Place.get(xurLocation.placeHash);
+  if (!placeDef) {
+    return null;
+  }
+  const destinationDef = defs.Destination.get(xurLocation.destinationHash);
+  if (!destinationDef) {
+    return null;
+  }
+  const bubbleDef = destinationDef.bubbles[xurLocation.bubbleIndex];
+
+  return `${bubbleDef.displayProperties.name}, ${destinationDef.displayProperties.name}, ${placeDef.displayProperties.name}`;
 }

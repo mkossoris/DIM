@@ -1,20 +1,21 @@
+import Countdown from 'app/dim-ui/Countdown';
+import { t } from 'app/i18next-t';
+import { DimStore } from 'app/inventory/store-types';
+import { percent } from 'app/shell/filters';
+import {
+  DestinyCharacterProgressionComponent,
+  DestinyClass,
+  DestinyProfileResponse,
+  DestinySeasonDefinition,
+  DestinySeasonPassDefinition,
+} from 'bungie-api-ts/destiny2';
+import clsx from 'clsx';
+import brightEngrams from 'data/d2/bright-engrams.json';
+import _ from 'lodash';
 import React from 'react';
 import { D2ManifestDefinitions } from '../destiny2/d2-definitions';
 import BungieImage from '../dim-ui/BungieImage';
-import {
-  DestinyCharacterProgressionComponent,
-  DestinySeasonDefinition,
-  DestinySeasonPassDefinition,
-  DestinyProfileResponse,
-  DestinyClass
-} from 'bungie-api-ts/destiny2';
-import Countdown from 'app/dim-ui/Countdown';
-import { t } from 'app/i18next-t';
 import styles from './PursuitItem.m.scss';
-import { percent } from 'app/shell/filters';
-import clsx from 'clsx';
-import { DimStore } from 'app/inventory/store-types';
-import brightEngrams from 'data/d2/bright-engrams.json';
 
 export default function SeasonalRank({
   store,
@@ -22,12 +23,12 @@ export default function SeasonalRank({
   characterProgressions,
   season,
   seasonPass,
-  profileInfo
+  profileInfo,
 }: {
   store: DimStore;
   defs: D2ManifestDefinitions;
   characterProgressions: DestinyCharacterProgressionComponent;
-  season: DestinySeasonDefinition | undefined;
+  season?: DestinySeasonDefinition;
   seasonPass?: DestinySeasonPassDefinition;
   profileInfo: DestinyProfileResponse;
 }) {
@@ -64,6 +65,12 @@ export default function SeasonalRank({
   const { progressToNextLevel, nextLevelAt } = prestigeMode ? prestigeProgress : seasonProgress;
   const { rewardItems } = defs.Progression.get(seasonPassProgressionHash);
 
+  const brightEngramRewardLevels = _.uniq(
+    rewardItems
+      .filter((item) => item.itemHash === brightEngramHash)
+      .map((item) => item.rewardedAtProgressionLevel % 10)
+  );
+
   if (
     // Only add the fake rewards once
     !rewardItems.filter((item) => item.rewardedAtProgressionLevel === prestigeRewardLevel).length
@@ -72,7 +79,8 @@ export default function SeasonalRank({
     rewardItems.push(fakeReward(brightEngramHash, brightEngramRewardLevel));
   }
 
-  const getBrightEngram = prestigeMode && (seasonalRank + 1) % 5 === 0;
+  const getBrightEngram =
+    prestigeMode && brightEngramRewardLevels.includes((seasonalRank + 1) % 10);
   // Get the reward item for the next progression level
   const nextRewardItems = rewardItems
     .filter((item) =>
@@ -85,6 +93,24 @@ export default function SeasonalRank({
     // Filter class-specific items
     .filter((item) => {
       const def = defs.InventoryItem.get(item.itemHash);
+
+      if (!def) {
+        return false;
+      }
+
+      const plugCategoryId = def.plug?.plugCategoryIdentifier ?? '';
+
+      if (def.itemSubType === 21) {
+        // Ornament Only Filtering
+        if (plugCategoryId.includes('_titan_')) {
+          return DestinyClass.Titan === store.classType;
+        } else if (plugCategoryId.includes('_hunter_')) {
+          return DestinyClass.Hunter === store.classType;
+        } else if (plugCategoryId.includes('_warlock_')) {
+          return DestinyClass.Warlock === store.classType;
+        }
+      }
+
       return def.classType === DestinyClass.Unknown || def.classType === store.classType;
     })
     // Premium reward first to match companion
@@ -99,7 +125,7 @@ export default function SeasonalRank({
   return (
     <div
       className={clsx('seasonal-rank', 'milestone-quest', {
-        'has-premium-rewards': hasPremiumRewards
+        'has-premium-rewards': hasPremiumRewards,
       })}
     >
       <div className="milestone-icon">
@@ -114,14 +140,14 @@ export default function SeasonalRank({
             const itemInfo = prestigeMode
               ? getBrightEngram
                 ? defs.InventoryItem.get(brightEngramHash)
-                : season // make fake item out of season info for prestigeMode
+                : defs.InventoryItem.get(season.artifactItemHash || 0) // make fake item out of season info for prestigeMode
               : defs.InventoryItem.get(item.itemHash);
 
             return (
               <div
                 className={clsx('seasonal-reward-wrapper', styles.pursuit, {
                   free: item.uiDisplayStyle === 'free',
-                  premium: item.uiDisplayStyle === 'premium'
+                  premium: item.uiDisplayStyle === 'premium',
                 })}
                 key={itemInfo.hash}
               >
@@ -185,6 +211,6 @@ function fakeReward(hash: number, level: number) {
     itemHash: hash,
     quantity: 1,
     rewardedAtProgressionLevel: level,
-    uiDisplayStyle: 'free'
+    uiDisplayStyle: 'free',
   };
 }

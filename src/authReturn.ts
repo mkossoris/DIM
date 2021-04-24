@@ -1,16 +1,14 @@
-import { parse } from 'simple-query-string';
+import { errorLog } from 'app/utils/log';
 import { getAccessTokenFromCode } from './app/bungie-api/oauth';
 import { setToken } from './app/bungie-api/oauth-tokens';
 import { reportException } from './app/utils/exceptions';
 
 function handleAuthReturn() {
-  const queryString = parse(window.location.href);
+  const queryParams = new URL(window.location.href).searchParams;
+  const code = queryParams.get('code');
+  const state = queryParams.get('state');
 
-  const code = queryString.code;
-  const state = queryString.state;
-  const authorized = code?.length > 0;
-
-  if (!authorized) {
+  if (!code?.length) {
     setError("We expected an authorization code parameter from Bungie.net, but didn't get one.");
     return;
   }
@@ -39,9 +37,9 @@ function handleAuthReturn() {
         );
         return;
       }
-      console.error("Couldn't get access token", error);
+      errorLog('bungie auth', "Couldn't get access token", error);
       reportException('authReturn', error);
-      setError(error.message || error.data?.error_description || 'Unknown'); // eslint-disable-line @typescript-eslint/camelcase
+      setError(error.message || error.data?.error_description || 'Unknown'); // eslint-disable-line @typescript-eslint/naming-convention
     });
 }
 

@@ -1,22 +1,18 @@
+import { VENDORS } from 'app/search/d2-known-values';
 import {
+  DestinyCollectibleComponent,
+  DestinyDisplayPropertiesDefinition,
+  DestinyItemComponentSetOfint32,
+  DestinyItemQuantity,
+  DestinyItemSocketEntryPlugItemDefinition,
+  DestinyVendorDefinition,
   DestinyVendorItemDefinition,
   DestinyVendorSaleItemComponent,
-  DestinyItemComponentSetOfint32,
-  DestinyVendorDefinition,
-  ItemBindStatus,
-  ItemLocation,
-  TransferStatuses,
-  ItemState,
-  DestinyItemSocketEntryPlugItemDefinition,
-  DestinyDisplayPropertiesDefinition,
-  DestinyItemQuantity,
-  DestinyCollectibleComponent
 } from 'bungie-api-ts/destiny2';
 import { D2ManifestDefinitions } from '../destiny2/d2-definitions';
-import { makeItem } from '../inventory/store/d2-item-factory';
-import { DimItem } from '../inventory/item-types';
 import { InventoryBuckets } from '../inventory/inventory-buckets';
-import _ from 'lodash';
+import { DimItem } from '../inventory/item-types';
+import { makeFakeItem } from '../inventory/store/d2-item-factory';
 
 /**
  * A displayable vendor item.
@@ -134,27 +130,13 @@ export class VendorItem {
       this.previewVendorHash = inventoryItem.preview.previewVendorHash;
     }
 
-    this.item = makeItem(
+    this.item = makeFakeItem(
       defs,
       buckets,
-      new Set(),
-      new Set(),
-      undefined,
       itemComponents,
-      {
-        itemHash,
-        itemInstanceId: saleItem ? saleItem.vendorItemIndex.toString() : itemHash.toString(),
-        quantity: vendorItemDef ? vendorItemDef.quantity : 1,
-        bindStatus: ItemBindStatus.NotBound,
-        location: ItemLocation.Vendor,
-        bucketHash: 0,
-        transferStatus: TransferStatuses.NotTransferrable,
-        lockable: false,
-        state: ItemState.None,
-        isWrapper: false,
-        tooltipNotificationIndexes: []
-      },
-      undefined,
+      itemHash,
+      saleItem ? saleItem.vendorItemIndex.toString() : itemHash.toString(),
+      vendorItemDef ? vendorItemDef.quantity : 1,
       mergedCollectibles
     );
 
@@ -163,7 +145,7 @@ export class VendorItem {
     }
 
     // only apply for 2255782930, master rahool
-    if (vendorHash === 2255782930 && saleItem?.overrideStyleItemHash && this.item) {
+    if (vendorHash === VENDORS.RAHOOL && saleItem?.overrideStyleItemHash && this.item) {
       const itemDef = defs.InventoryItem.get(saleItem.overrideStyleItemHash);
       if (itemDef) {
         const display = itemDef.displayProperties;

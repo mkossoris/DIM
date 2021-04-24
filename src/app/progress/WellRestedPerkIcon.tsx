@@ -1,18 +1,19 @@
-import React from 'react';
-import { isWellRested } from '../inventory/store/well-rested';
-import { D2ManifestDefinitions } from '../destiny2/d2-definitions';
-import BungieImage from '../dim-ui/BungieImage';
+import { WELL_RESTED_PERK } from 'app/search/d2-known-values';
 import {
   DestinyCharacterProgressionComponent,
   DestinySeasonDefinition,
-  DestinySeasonPassDefinition
+  DestinySeasonPassDefinition,
 } from 'bungie-api-ts/destiny2';
+import React from 'react';
+import { D2ManifestDefinitions } from '../destiny2/d2-definitions';
+import BungieImage from '../dim-ui/BungieImage';
+import { isWellRested } from '../inventory/store/well-rested';
 
 export default function WellRestedPerkIcon({
   defs,
   progressions,
   season,
-  seasonPass
+  seasonPass,
 }: {
   defs: D2ManifestDefinitions;
   progressions: DestinyCharacterProgressionComponent;
@@ -24,9 +25,8 @@ export default function WellRestedPerkIcon({
   if (!wellRestedInfo.wellRested) {
     return null;
   }
-  const wellRestedPerk = defs.SandboxPerk.get(2352765282);
+  const wellRestedPerk = defs.SandboxPerk.get(WELL_RESTED_PERK);
   if (!wellRestedPerk) {
-    console.error("Couldn't find Well Rested perk in manifest");
     return null;
   }
   const perkDisplay = wellRestedPerk.displayProperties;

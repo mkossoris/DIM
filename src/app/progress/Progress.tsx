@@ -1,38 +1,43 @@
-import { t } from 'app/i18next-t';
-import React, { useState, useEffect, useCallback } from 'react';
-import _ from 'lodash';
-import { DestinyAccount } from '../accounts/destiny-account';
-import './progress.scss';
-import ErrorBoundary from '../dim-ui/ErrorBoundary';
-import { Loading } from '../dim-ui/Loading';
-import { connect } from 'react-redux';
-import { RootState } from '../store/reducers';
-import { refresh$ } from '../shell/refresh';
-import CollapsibleTitle from '../dim-ui/CollapsibleTitle';
-import PresentationNodeRoot from '../collections/PresentationNodeRoot';
-import { InventoryBuckets } from '../inventory/inventory-buckets';
-import { D2ManifestDefinitions, getDefinitions } from '../destiny2/d2-definitions';
-import PageWithMenu from 'app/dim-ui/PageWithMenu';
-import { DimStore } from 'app/inventory/store-types';
-import { sortedStoresSelector, profileResponseSelector } from 'app/inventory/reducer';
-import { D2StoresService } from 'app/inventory/d2-stores';
+import { trackedTriumphsSelector } from 'app/dim-api/selectors';
 import CharacterSelect from 'app/dim-ui/CharacterSelect';
-import { AppIcon } from 'app/shell/icons';
-import { faExternalLinkAlt } from '@fortawesome/free-solid-svg-icons';
-import { queueAction } from 'app/inventory/action-queue';
-import destinySetsLogo from '../../images/destinySetsLogo.svg';
-import braytechLogo from '../../images/braytechLogo.svg';
-import d2ChecklistLogo from '../../images/d2ChecklistLogo.svg';
-import Pursuits from './Pursuits';
-import Factions from './Factions';
+import PageWithMenu from 'app/dim-ui/PageWithMenu';
+import ShowPageLoading from 'app/dim-ui/ShowPageLoading';
+import { t } from 'app/i18next-t';
+import { DimItem } from 'app/inventory/item-types';
+import {
+  allItemsSelector,
+  bucketsSelector,
+  profileResponseSelector,
+  sortedStoresSelector,
+} from 'app/inventory/selectors';
+import { DimStore } from 'app/inventory/store-types';
+import { useLoadStores } from 'app/inventory/store/hooks';
+import { getCurrentStore, getStore } from 'app/inventory/stores-helpers';
+import { destiny2CoreSettingsSelector } from 'app/manifest/selectors';
+import { RAID_NODE } from 'app/search/d2-known-values';
+import { ItemFilter } from 'app/search/filter-types';
+import { searchFilterSelector } from 'app/search/search-filter';
+import { querySelector } from 'app/shell/selectors';
+import { RootState } from 'app/store/types';
+import { Destiny2CoreSettings } from 'bungie-api-ts/core';
+import { DestinyProfileResponse } from 'bungie-api-ts/destiny2';
+import { motion, PanInfo } from 'framer-motion';
+import React, { useState } from 'react';
+import { connect } from 'react-redux';
+import { DestinyAccount } from '../accounts/destiny-account';
+import { D2ManifestDefinitions } from '../destiny2/d2-definitions';
+import CollapsibleTitle from '../dim-ui/CollapsibleTitle';
+import ErrorBoundary from '../dim-ui/ErrorBoundary';
+import { InventoryBuckets } from '../inventory/inventory-buckets';
+import '../records/PresentationNode.scss';
 import Milestones from './Milestones';
-import Ranks from './Ranks';
+import './progress.scss';
+import Pursuits from './Pursuits';
 import Raids from './Raids';
-import Hammer from 'react-hammerjs';
-import { DestinyProfileResponse, DestinyVendorsResponse } from 'bungie-api-ts/destiny2';
-import { loadingTracker } from 'app/shell/loading-tracker';
-import { useSubscription } from 'app/utils/hooks';
-import { getVendors } from '../bungie-api/destiny2-api';
+import Ranks from './Ranks';
+import SeasonalChallenges from './SeasonalChallenges';
+import SolsticeOfHeroes, { solsticeOfHeroesArmor } from './SolsticeOfHeroes';
+import { TrackedTriumphs } from './TrackedTriumphs';
 
 interface ProvidedProps {
   account: DestinyAccount;
@@ -44,6 +49,11 @@ interface StoreProps {
   defs?: D2ManifestDefinitions;
   stores: DimStore[];
   profileInfo?: DestinyProfileResponse;
+  searchQuery?: string;
+  trackedTriumphs: number[];
+  searchFilter?: ItemFilter;
+  allItems: DimItem[];
+  coreSettings?: Destiny2CoreSettings;
 }
 
 type Props = ProvidedProps & StoreProps;
@@ -53,149 +63,98 @@ function mapStateToProps(state: RootState): StoreProps {
     isPhonePortrait: state.shell.isPhonePortrait,
     stores: sortedStoresSelector(state),
     defs: state.manifest.d2Manifest,
-    buckets: state.inventory.buckets,
-    profileInfo: profileResponseSelector(state)
+    buckets: bucketsSelector(state),
+    profileInfo: profileResponseSelector(state),
+    searchQuery: querySelector(state),
+    searchFilter: searchFilterSelector(state),
+    trackedTriumphs: trackedTriumphsSelector(state),
+    allItems: allItemsSelector(state),
+    coreSettings: destiny2CoreSettingsSelector(state),
   };
 }
 
-async function loadVendors(account: DestinyAccount, profileInfo: DestinyProfileResponse) {
-  const characterIds = profileInfo.characters.data ? Object.keys(profileInfo.characters.data) : [];
-  let vendors: DestinyVendorsResponse[] = [];
-  try {
-    vendors = await Promise.all(
-      characterIds.map((characterId) => getVendors(account, characterId))
-    );
-  } catch (e) {
-    console.error('Failed to load vendors', e);
-  }
-
-  return _.zipObject(characterIds, vendors);
-}
-
-const refreshStores = () =>
-  refresh$.subscribe(() => queueAction(() => D2StoresService.reloadStores()));
-
-function Progress({ account, defs, stores, isPhonePortrait, buckets, profileInfo }: Props) {
+function Progress({
+  account,
+  defs,
+  stores,
+  isPhonePortrait,
+  buckets,
+  profileInfo,
+  searchQuery,
+  trackedTriumphs,
+  allItems,
+  coreSettings,
+}: Props) {
   const [selectedStoreId, setSelectedStoreId] = useState<string | undefined>(undefined);
-  const [vendors, setVendors] = useState<
-    { [characterId: string]: DestinyVendorsResponse } | undefined
-  >(undefined);
 
-  useEffect(() => {
-    if (!defs) {
-      getDefinitions();
-    }
-  }, [defs]);
-
-  useEffect(() => {
-    if (profileInfo && !vendors) {
-      loadingTracker.addPromise(loadVendors(account, profileInfo).then(setVendors));
-    }
-  }, [account, profileInfo, vendors]);
-  useSubscription(
-    useCallback(
-      () =>
-        refresh$.subscribe(() => {
-          if (profileInfo) {
-            const promise = loadVendors(account, profileInfo).then(setVendors);
-            loadingTracker.addPromise(promise);
-          }
-        }),
-      [account, profileInfo]
-    )
-  );
-
-  useEffect(() => {
-    if (!profileInfo) {
-      D2StoresService.getStoresStream(account);
-    }
-  });
-
-  useSubscription(refreshStores);
+  useLoadStores(account, Boolean(profileInfo));
 
   if (!defs || !profileInfo || !stores.length) {
-    return (
-      <div className="progress-page dim-page">
-        <Loading />
-      </div>
-    );
+    return <ShowPageLoading message={t('Loading.Profile')} />;
   }
 
-  // TODO: Searchable (item, description)
-  // TODO: triumph search?
-  // TODO: track triumphs?
-  // TODO: close / pinnacle triumphs?
-  // TODO: move vendor load into faction component?
-  // TODO: badge the corner of expired bounties (red background, clock)
-  // TODO: show rewards in item popup
-  // TODO: show "flavor text" in item popup (itemDef.displaySource)
-  // TODO: show expiration in item popup
-  // TODO: show tracked overlay
-  // TODO: do our own display, don't need the full inventory item right?
-  // TODO: break up into components!
-  // TODO: grid the triumphs
-  // TODO: show expiration
-  // TODO: separate milestones (daily, weekly, story?)
   // TODO: make milestones and pursuits look similar?
   // TODO: search/filter by activity
   // TODO: dropdowns for searches (reward, activity)
 
-  // Non-item info:
-  // * expiration
-  // * flavor text
-  // * rewards
+  const handleSwipe = (_e, info: PanInfo) => {
+    // Velocity is in px/ms
+    if (Math.abs(info.offset.x) < 10 || Math.abs(info.velocity.x) < 300) {
+      return;
+    }
 
-  const handleSwipe: HammerListener = (e) => {
+    const direction = -Math.sign(info.velocity.x);
+
     const characters = stores.filter((s) => !s.isVault);
 
     const selectedStoreIndex = selectedStoreId
       ? characters.findIndex((s) => s.id === selectedStoreId)
       : characters.findIndex((s) => s.current);
 
-    if (e.direction === 2 && selectedStoreIndex < characters.length - 1) {
+    if (direction > 0 && selectedStoreIndex < characters.length - 1) {
       setSelectedStoreId(characters[selectedStoreIndex + 1].id);
-    } else if (e.direction === 4 && selectedStoreIndex > 0) {
+    } else if (direction < 0 && selectedStoreIndex > 0) {
       setSelectedStoreId(characters[selectedStoreIndex - 1].id);
     }
   };
 
   const selectedStore = selectedStoreId
-    ? stores.find((s) => s.id === selectedStoreId)!
-    : stores.find((s) => s.current)!;
+    ? getStore(stores, selectedStoreId)!
+    : getCurrentStore(stores)!;
 
-  if (!defs || !buckets) {
+  if (!buckets) {
     return null;
   }
 
-  const triumphTitle = defs.PresentationNode.get(1024788583).displayProperties.name;
-  const sealTitle = defs.PresentationNode.get(1652422747).displayProperties.name;
-  const raidTitle = defs.PresentationNode.get(2975760062).displayProperties.name;
+  const raidNode = defs.PresentationNode.get(RAID_NODE);
+  const raidTitle = raidNode?.displayProperties.name;
+
+  const solsticeTitle = defs.InventoryItem.get(3723510815).displayProperties.name;
+  const solsticeArmor = solsticeOfHeroesArmor(allItems, selectedStore);
+
+  const seasonalChallengesPresentationNode =
+    coreSettings?.seasonalChallengesPresentationNodeHash &&
+    defs.PresentationNode.get(coreSettings.seasonalChallengesPresentationNodeHash);
 
   const menuItems = [
     { id: 'ranks', title: t('Progress.CrucibleRank') },
+    ...(solsticeArmor.length ? [{ id: 'solstice', title: solsticeTitle }] : []),
     { id: 'milestones', title: t('Progress.Milestones') },
+    ...(seasonalChallengesPresentationNode
+      ? [
+          {
+            id: 'seasonal-challenges',
+            title: seasonalChallengesPresentationNode.displayProperties.name,
+          },
+        ]
+      : []),
     { id: 'Bounties', title: t('Progress.Bounties') },
     { id: 'Quests', title: t('Progress.Quests') },
     { id: 'Items', title: t('Progress.Items') },
-    { id: 'raids', title: raidTitle },
-    { id: 'triumphs', title: triumphTitle },
-    { id: 'seals', title: sealTitle },
-    { id: 'factions', title: t('Progress.Factions') }
+    ...(raidNode ? [{ id: 'raids', title: raidTitle }] : []),
+    { id: 'trackedTriumphs', title: t('Progress.TrackedTriumphs') },
   ];
-  const externalLinks = [
-    {
-      href: `https://braytech.org/${account.originalPlatformType}/${account.membershipId}/${selectedStore.id}/`,
-      title: 'BrayTech.org',
-      logo: braytechLogo
-    },
-    { href: 'https://destinysets.com/', title: 'DestinySets', logo: destinySetsLogo },
-    { href: 'https://lowlidev.com.au/destiny/maps', title: 'lowlidev maps' },
-    {
-      href: `https://www.d2checklist.com/${account.originalPlatformType}/${account.membershipId}`,
-      title: 'D2Checklist',
-      logo: d2ChecklistLogo
-    }
-  ];
+  const trackedRecordHash = profileInfo?.profileRecords?.data?.trackedRecordHash || 0;
 
   return (
     <ErrorBoundary name="Progress">
@@ -204,7 +163,6 @@ function Progress({ account, defs, stores, isPhonePortrait, buckets, profileInfo
           {selectedStore && (
             <CharacterSelect
               stores={stores}
-              vertical={!isPhonePortrait}
               isPhonePortrait={isPhonePortrait}
               selectedStore={selectedStore}
               onCharacterChanged={setSelectedStoreId}
@@ -217,55 +175,56 @@ function Progress({ account, defs, stores, isPhonePortrait, buckets, profileInfo
                   <span>{menuItem.title}</span>
                 </PageWithMenu.MenuButton>
               ))}
-              {externalLinks.map((menuItem) => (
-                <PageWithMenu.MenuButton
-                  key={menuItem.href}
-                  className="menu-link"
-                  href={menuItem.href}
-                  target="_blank"
-                >
-                  {menuItem.logo && <img src={menuItem.logo} />}
-                  <span>
-                    {menuItem.title} <AppIcon icon={faExternalLinkAlt} />
-                  </span>
-                </PageWithMenu.MenuButton>
-              ))}
             </div>
           )}
         </PageWithMenu.Menu>
 
         <PageWithMenu.Contents className="progress-panel">
-          <Hammer direction="DIRECTION_HORIZONTAL" onSwipe={handleSwipe}>
-            <div>
-              <section id="ranks">
-                <CollapsibleTitle title={t('Progress.CrucibleRank')} sectionId="profile-ranks">
-                  <div className="progress-row">
-                    <ErrorBoundary name="CrucibleRanks">
-                      <Ranks profileInfo={profileInfo} defs={defs} />
-                    </ErrorBoundary>
-                  </div>
-                </CollapsibleTitle>
-              </section>
+          <motion.div className="horizontal-swipable" onPanEnd={handleSwipe}>
+            <section id="ranks">
+              <CollapsibleTitle title={t('Progress.CrucibleRank')} sectionId="profile-ranks">
+                <div className="progress-row">
+                  <ErrorBoundary name="CrucibleRanks">
+                    <Ranks profileInfo={profileInfo} defs={defs} />
+                  </ErrorBoundary>
+                </div>
+              </CollapsibleTitle>
+            </section>
 
-              <section id="milestones">
-                <CollapsibleTitle title={t('Progress.Milestones')} sectionId="milestones">
-                  <div className="progress-row">
-                    <ErrorBoundary name="Milestones">
-                      <Milestones
-                        defs={defs}
-                        buckets={buckets}
-                        profileInfo={profileInfo}
-                        store={selectedStore}
-                      />
-                    </ErrorBoundary>
-                  </div>
-                </CollapsibleTitle>
-              </section>
+            <SolsticeOfHeroes defs={defs} armor={solsticeArmor} title={solsticeTitle} />
 
-              <ErrorBoundary name="Pursuits">
-                <Pursuits store={selectedStore} defs={defs} />
+            <section id="milestones">
+              <CollapsibleTitle title={t('Progress.Milestones')} sectionId="milestones">
+                <div className="progress-row">
+                  <ErrorBoundary name="Milestones">
+                    <Milestones
+                      defs={defs}
+                      buckets={buckets}
+                      profileInfo={profileInfo}
+                      store={selectedStore}
+                    />
+                  </ErrorBoundary>
+                </div>
+              </CollapsibleTitle>
+            </section>
+
+            {seasonalChallengesPresentationNode && (
+              <ErrorBoundary name="SeasonalChallenges">
+                <SeasonalChallenges
+                  seasonalChallengesPresentationNode={seasonalChallengesPresentationNode}
+                  store={selectedStore}
+                  defs={defs}
+                  buckets={buckets}
+                  profileResponse={profileInfo}
+                />
               </ErrorBoundary>
+            )}
 
+            <ErrorBoundary name="Pursuits">
+              <Pursuits store={selectedStore} defs={defs} />
+            </ErrorBoundary>
+
+            {raidNode && (
               <section id="raids">
                 <CollapsibleTitle title={raidTitle} sectionId="raids">
                   <div className="progress-row">
@@ -275,43 +234,24 @@ function Progress({ account, defs, stores, isPhonePortrait, buckets, profileInfo
                   </div>
                 </CollapsibleTitle>
               </section>
+            )}
 
-              <section id="triumphs">
-                <ErrorBoundary name="Triumphs">
-                  <PresentationNodeRoot
-                    presentationNodeHash={1024788583}
-                    defs={defs}
-                    profileResponse={profileInfo}
-                  />
-                </ErrorBoundary>
-              </section>
-
-              <section id="seals">
-                <ErrorBoundary name="Seals">
-                  <PresentationNodeRoot
-                    presentationNodeHash={1652422747}
-                    defs={defs}
-                    profileResponse={profileInfo}
-                  />
-                </ErrorBoundary>
-              </section>
-
-              <section id="factions">
-                <CollapsibleTitle title={t('Progress.Factions')} sectionId="progress-factions">
-                  <div className="progress-row">
-                    <ErrorBoundary name="Factions">
-                      <Factions
-                        defs={defs}
-                        profileInfo={profileInfo}
-                        store={selectedStore}
-                        vendors={vendors}
-                      />
-                    </ErrorBoundary>
-                  </div>
-                </CollapsibleTitle>
-              </section>
-            </div>
-          </Hammer>
+            <section id="trackedTriumphs">
+              <CollapsibleTitle title={t('Progress.TrackedTriumphs')} sectionId="trackedTriumphs">
+                <div className="progress-row">
+                  <ErrorBoundary name={t('Progress.TrackedTriumphs')}>
+                    <TrackedTriumphs
+                      trackedTriumphs={trackedTriumphs}
+                      trackedRecordHash={trackedRecordHash}
+                      defs={defs}
+                      profileResponse={profileInfo}
+                      searchQuery={searchQuery}
+                    />
+                  </ErrorBoundary>
+                </div>
+              </CollapsibleTitle>
+            </section>
+          </motion.div>
         </PageWithMenu.Contents>
       </PageWithMenu>
     </ErrorBoundary>

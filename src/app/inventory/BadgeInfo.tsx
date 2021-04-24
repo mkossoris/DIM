@@ -1,42 +1,39 @@
-import React from 'react';
-import { t } from 'app/i18next-t';
-import { DimItem } from './item-types';
-import { getColor } from '../shell/filters';
-import ghostPerks from 'data/d2/ghost-perks.json';
-import _ from 'lodash';
-import { weakMemoize } from 'app/utils/util';
-import RatingIcon from './RatingIcon';
+import { itemHashTagsSelector, itemInfosSelector } from 'app/inventory/selectors';
+import { RootState } from 'app/store/types';
+import { isD1Item } from 'app/utils/item-utils';
+import { InventoryWishListRoll, UiWishListRoll } from 'app/wishlists/wishlists';
+import { DamageType, DestinyEnergyType } from 'bungie-api-ts/destiny2';
 import clsx from 'clsx';
+import { BucketHashes, ItemCategoryHashes } from 'data/d2/generated-enums';
+import React from 'react';
+import { useSelector } from 'react-redux';
+import ElementIcon from '../dim-ui/ElementIcon';
+import { getColor } from '../shell/filters';
 import styles from './BadgeInfo.m.scss';
-import ElementIcon from './ElementIcon';
-import { energyCapacityTypeNames } from '../item-popup/EnergyMeter';
-import { UiWishListRoll } from 'app/wishlists/wishlists';
+import { getNotes } from './dim-item-info';
+import { DimItem } from './item-types';
+import RatingIcon from './RatingIcon';
+
+const energyTypeStyles: Record<DestinyEnergyType, string> = {
+  [DestinyEnergyType.Arc]: styles.arc,
+  [DestinyEnergyType.Thermal]: styles.solar,
+  [DestinyEnergyType.Void]: styles.void,
+  [DestinyEnergyType.Ghost]: '',
+  [DestinyEnergyType.Subclass]: '',
+  [DestinyEnergyType.Any]: '',
+};
 
 interface Props {
   item: DimItem;
   isCapped: boolean;
-  /** Rating value */
-  rating?: number;
-  uiWishListRoll?: UiWishListRoll;
+  wishlistRoll?: InventoryWishListRoll;
 }
-
-const getGhostInfos = weakMemoize((item: DimItem) =>
-  item.isDestiny2 &&
-  item.isDestiny2() &&
-  item.sockets &&
-  item.itemCategoryHashes &&
-  item.itemCategoryHashes.includes(39)
-    ? _.compact(
-        item.sockets.sockets.map((s) => {
-          const hash = s.plug?.plugItem?.hash;
-          return hash && ghostPerks[hash];
-        })
-      )
-    : []
-);
 
 export function hasBadge(item?: DimItem | null): boolean {
   if (!item) {
+    return false;
+  }
+  if (item.isEngram && item.location.hash === BucketHashes.Engrams) {
     return false;
   }
   return (
@@ -44,25 +41,24 @@ export function hasBadge(item?: DimItem | null): boolean {
     item.classified ||
     (item.objectives && !item.complete && !item.hidePercentage) ||
     (item.maxStackSize > 1 && item.amount > 1) ||
-    item.itemCategoryHashes?.includes(39)
+    item.itemCategoryHashes?.includes(ItemCategoryHashes.Ghost)
   );
 }
 
-export default function BadgeInfo({ item, isCapped, rating, uiWishListRoll }: Props) {
+export default function BadgeInfo({ item, isCapped, wishlistRoll }: Props) {
+  const savedNotes = useSelector<RootState, string | undefined>((state) =>
+    getNotes(item, itemInfosSelector(state), itemHashTagsSelector(state))
+  );
   const isBounty = Boolean(!item.primStat && item.objectives);
   const isStackable = Boolean(item.maxStackSize > 1);
-  // treat D1 ghosts as generic items
-  const isGhost = Boolean(
-    item.isDestiny2 && item.isDestiny2() && item.itemCategoryHashes?.includes(39)
-  );
-  const isGeneric = !isBounty && !isStackable && !isGhost;
-
-  const ghostInfos = getGhostInfos(item);
+  const isGeneric = !isBounty && !isStackable;
+  const wishlistRollIcon =
+    wishlistRoll && (wishlistRoll.isUndesirable ? UiWishListRoll.Bad : UiWishListRoll.Good);
 
   const hideBadge = Boolean(
-    (isBounty && (item.complete || item.hidePercentage)) ||
+    (item.isEngram && item.location.hash === BucketHashes.Engrams) ||
+      (isBounty && (item.complete || item.hidePercentage)) ||
       (isStackable && item.amount === 1) ||
-      (isGhost && !ghostInfos.length && !item.classified) ||
       (isGeneric && !item.primStat?.value && !item.classified)
   );
 
@@ -70,65 +66,47 @@ export default function BadgeInfo({ item, isCapped, rating, uiWishListRoll }: Pr
     return null;
   }
 
-  const badgeclsx = {
-    [styles.fullstack]: isStackable && item.amount === item.maxStackSize,
-    [styles.capped]: isCapped,
-    [styles.masterwork]: item.masterwork
-  };
-
   const badgeContent =
     (isBounty && `${Math.floor(100 * item.percentComplete)}%`) ||
     (isStackable && item.amount.toString()) ||
-    (isGhost && ghostBadgeContent(item)) ||
     (isGeneric && item.primStat?.value.toString()) ||
-    (item.classified && '???');
-
-  const reviewclsx = {
-    [styles.review]: true,
-    [styles.wishlistRoll]: uiWishListRoll
-  };
-
-  const badgeElement =
-    item.dmg ||
-    (item.isDestiny2() && item.energy && energyCapacityTypeNames[item.energy.energyType]) ||
-    null;
+    (item.classified && (savedNotes ?? '???'));
 
   return (
-    <div className={clsx(styles.badge, badgeclsx)}>
-      {item.isDestiny1() && item.quality && (
+    <div
+      className={clsx(styles.badge, {
+        [styles.fullstack]: isStackable && item.amount === item.maxStackSize,
+        [styles.capped]: isCapped,
+        [styles.masterwork]: item.masterwork,
+        [styles.engram]: item.isEngram,
+      })}
+    >
+      {isD1Item(item) && item.quality && (
         <div className={styles.quality} style={getColor(item.quality.min, 'backgroundColor')}>
           {item.quality.min}%
         </div>
       )}
-      {(rating !== undefined || uiWishListRoll) && (
-        <div className={clsx(reviewclsx)}>
-          <RatingIcon rating={rating || 1} uiWishListRoll={uiWishListRoll} />
+      {wishlistRollIcon && (
+        <div
+          className={clsx({
+            [styles.wishlistRoll]: wishlistRollIcon,
+          })}
+        >
+          <RatingIcon uiWishListRoll={wishlistRollIcon} />
         </div>
       )}
-      <div className={styles.primaryStat}>
-        {/*
-        // this is where the item's total energy capacity would go if we could just add things willy nilly to the badge bar
-        item.isDestiny2() && item.energy && (<span className={clsx(energyTypeStyles[item.energy.energyType], styles.energyCapacity)}>
-        {item.energy.energyCapacity}</span>)
-        */}
-        {badgeElement && <ElementIcon element={badgeElement} />}
-        <span>{badgeContent}</span>
-      </div>
+      {item.energy ? (
+        <span className={clsx(energyTypeStyles[item.energy.energyType], styles.energyCapacity)}>
+          {item.energy.energyCapacity}
+          <ElementIcon element={item.element} className={styles.energyCapacityIcon} />
+        </span>
+      ) : (
+        item.element &&
+        !(item.bucket.inWeapons && item.element.enumValue === DamageType.Kinetic) && (
+          <ElementIcon element={item.element} className={styles.lightBackgroundElement} />
+        )
+      )}
+      <span>{badgeContent}</span>
     </div>
   );
-}
-
-function ghostBadgeContent(item: DimItem) {
-  const infos = getGhostInfos(item);
-
-  const planet = _.uniq(infos.map((i) => i.location).filter((l) => l !== true && l !== false))
-    // t('Ghost.crucible')  t('Ghost.dreaming')   t('Ghost.edz')      t('Ghost.gambit')
-    // t('Ghost.io')        t('Ghost.leviathan')  t('Ghost.mars')     t('Ghost.mercury')
-    // t('Ghost.nessus')    t('Ghost.strikes')    t('Ghost.tangled')  t('Ghost.titan')
-    // t('Ghost.moon')
-    .map((location) => t(`Ghost.${location}`))
-    .join(',');
-  const improved = infos.some((i) => i.type.improved) ? '+' : '';
-
-  return [planet, improved];
 }

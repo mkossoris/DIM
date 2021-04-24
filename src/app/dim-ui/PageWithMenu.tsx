@@ -1,11 +1,11 @@
+import clsx from 'clsx';
 import React from 'react';
 import styles from './PageWithMenu.m.scss';
-import clsx from 'clsx';
 import { scrollToHref } from './scroll';
 
 const PageWithMenu = ({
   children,
-  className
+  className,
 }: {
   children: React.ReactNode;
   className?: string;
@@ -13,7 +13,7 @@ const PageWithMenu = ({
 
 PageWithMenu.Menu = ({
   children,
-  className
+  className,
 }: {
   children: React.ReactNode;
   className?: string;
@@ -21,7 +21,7 @@ PageWithMenu.Menu = ({
 
 PageWithMenu.Contents = ({
   children,
-  className
+  className,
 }: {
   children: React.ReactNode;
   className?: string;
@@ -29,7 +29,7 @@ PageWithMenu.Contents = ({
 
 PageWithMenu.MenuHeader = ({
   children,
-  className
+  className,
 }: {
   children: React.ReactNode;
   className?: string;

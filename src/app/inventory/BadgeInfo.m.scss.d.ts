@@ -5,11 +5,12 @@ interface CssExports {
   'badge': string;
   'capped': string;
   'energyCapacity': string;
+  'energyCapacityIcon': string;
+  'engram': string;
   'fullstack': string;
+  'lightBackgroundElement': string;
   'masterwork': string;
-  'primaryStat': string;
   'quality': string;
-  'review': string;
   'solar': string;
   'void': string;
   'wishlistRoll': string;

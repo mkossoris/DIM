@@ -1,336 +1,383 @@
-import { UIViewInjectedProps } from '@uirouter/react';
-import { DestinyClass } from 'bungie-api-ts/destiny2';
-import { t } from 'app/i18next-t';
-import _ from 'lodash';
-import React from 'react';
-import { connect } from 'react-redux';
-import { DestinyAccount } from '../accounts/destiny-account';
-import CharacterSelect from '../dim-ui/CharacterSelect';
-import { Loading } from '../dim-ui/Loading';
-import { D2StoresService } from '../inventory/d2-stores';
-import { DimStore, D2Store } from '../inventory/store-types';
-import { RootState } from '../store/reducers';
-import GeneratedSets from './generated-sets/GeneratedSets';
-import { filterGeneratedSets, isLoadoutBuilderItem } from './generated-sets/utils';
-import { ArmorSet, StatTypes, ItemsByBucket, LockedMap, MinMaxIgnored } from './types';
-import { sortedStoresSelector, storesLoadedSelector, storesSelector } from '../inventory/reducer';
-import { process, filterItems, statKeys } from './process';
-import { createSelector } from 'reselect';
-import PageWithMenu from 'app/dim-ui/PageWithMenu';
-import FilterBuilds from './generated-sets/FilterBuilds';
-import LoadoutDrawer from 'app/loadout/LoadoutDrawer';
+import { LoadoutParameters, StatConstraint } from '@destinyitemmanager/dim-api-types';
+import { DestinyAccount } from 'app/accounts/destiny-account';
 import { D2ManifestDefinitions } from 'app/destiny2/d2-definitions';
-import SearchFilterInput from 'app/search/SearchFilterInput';
-import {
-  SearchConfig,
-  SearchFilters,
-  searchConfigSelector,
-  searchFiltersConfigSelector
-} from 'app/search/search-filters';
-import memoizeOne from 'memoize-one';
-import styles from './LoadoutBuilder.m.scss';
-import LockArmorAndPerks from './LockArmorAndPerks';
+import { settingsSelector } from 'app/dim-api/selectors';
 import CollapsibleTitle from 'app/dim-ui/CollapsibleTitle';
-import { DimItem } from 'app/inventory/item-types';
-import { Subscriptions } from 'app/utils/rx-utils';
-import { refresh$ } from 'app/shell/refresh';
-import { queueAction } from 'app/inventory/action-queue';
+import PageWithMenu from 'app/dim-ui/PageWithMenu';
+import { t } from 'app/i18next-t';
+import { DimItem, PluggableInventoryItemDefinition } from 'app/inventory/item-types';
+import { isPluggableItem } from 'app/inventory/store/sockets';
+import { Loadout } from 'app/loadout/loadout-types';
+import { loadoutFromEquipped } from 'app/loadout/loadout-utils';
+import { loadoutsSelector } from 'app/loadout/selectors';
+import { ItemFilter } from 'app/search/filter-types';
+import { searchFilterSelector } from 'app/search/search-filter';
+import { AppIcon, refreshIcon } from 'app/shell/icons';
+import { querySelector } from 'app/shell/selectors';
+import { RootState } from 'app/store/types';
+import { compareBy } from 'app/utils/comparators';
+import { isArmor2Mod } from 'app/utils/item-utils';
+import { AnimatePresence, motion } from 'framer-motion';
+import _ from 'lodash';
+import React, { useMemo } from 'react';
+import ReactDOM from 'react-dom';
+import { connect } from 'react-redux';
+import { createSelector } from 'reselect';
+import CharacterSelect from '../dim-ui/CharacterSelect';
+import { allItemsSelector } from '../inventory/selectors';
+import { DimStore } from '../inventory/store-types';
+import FilterBuilds from './filter/FilterBuilds';
+import LockArmorAndPerks from './filter/LockArmorAndPerks';
+import ModPicker from './filter/ModPicker';
+import PerkPicker from './filter/PerkPicker';
+import CompareDrawer from './generated-sets/CompareDrawer';
+import GeneratedSets from './generated-sets/GeneratedSets';
+import { sortGeneratedSets } from './generated-sets/utils';
+import { filterItems } from './item-filter';
+import { LoadoutBuilderState, useLbState } from './loadout-builder-reducer';
+import styles from './LoadoutBuilder.m.scss';
+import { useProcess } from './process/useProcess';
+import {
+  generalSocketReusablePlugSetHash,
+  ItemsByBucket,
+  statHashes,
+  statHashToType,
+  statKeys,
+  StatTypes,
+  statValues,
+} from './types';
+import { isLoadoutBuilderItem } from './utils';
 
 interface ProvidedProps {
   account: DestinyAccount;
+  defs: D2ManifestDefinitions;
+  stores: DimStore[];
+  preloadedLoadout?: Loadout;
 }
 
 interface StoreProps {
-  storesLoaded: boolean;
-  stores: DimStore[];
+  statOrder: StatTypes[];
+  assumeMasterwork: boolean;
   isPhonePortrait: boolean;
   items: Readonly<{
     [classType: number]: ItemsByBucket;
   }>;
-  defs?: D2ManifestDefinitions;
-  searchConfig: SearchConfig;
-  filters: SearchFilters;
+  loadouts: Loadout[];
+  filter: ItemFilter;
+  searchQuery: string;
+  halfTierMods: PluggableInventoryItemDefinition[];
 }
 
 type Props = ProvidedProps & StoreProps;
 
-interface State {
-  lockedMap: LockedMap;
-  selectedStoreId?: string;
-  statFilters: Readonly<{ [statType in StatTypes]: MinMaxIgnored }>;
-  minimumPower: number;
-  query: string;
-  statOrder: StatTypes[];
-  assumeMasterwork: boolean;
-}
-
 function mapStateToProps() {
+  /** Gets items for the loadout builder and creates a mapping of classType -> bucketHash -> item array. */
   const itemsSelector = createSelector(
-    storesSelector,
+    allItemsSelector,
     (
-      stores
+      allItems
     ): Readonly<{
       [classType: number]: ItemsByBucket;
     }> => {
       const items: {
         [classType: number]: { [bucketHash: number]: DimItem[] };
       } = {};
-      for (const store of stores) {
-        for (const item of store.items) {
-          if (!item || !item.isDestiny2() || !isLoadoutBuilderItem(item)) {
-            continue;
-          }
-          for (const classType of item.classType === DestinyClass.Unknown
-            ? [DestinyClass.Hunter, DestinyClass.Titan, DestinyClass.Warlock]
-            : [item.classType]) {
-            if (!items[classType]) {
-              items[classType] = {};
-            }
-            if (!items[classType][item.bucket.hash]) {
-              items[classType][item.bucket.hash] = [];
-            }
-            items[classType][item.bucket.hash].push(item);
-          }
+      for (const item of allItems) {
+        if (!item || !isLoadoutBuilderItem(item)) {
+          continue;
         }
+        const { classType, bucket } = item;
+
+        if (!items[classType]) {
+          items[classType] = {};
+        }
+
+        if (!items[classType][bucket.hash]) {
+          items[classType][bucket.hash] = [];
+        }
+
+        items[classType][bucket.hash].push(item);
       }
 
       return items;
     }
   );
 
-  return (state: RootState): StoreProps => ({
-    storesLoaded: storesLoadedSelector(state),
-    stores: sortedStoresSelector(state),
-    isPhonePortrait: state.shell.isPhonePortrait,
-    items: itemsSelector(state),
-    defs: state.manifest.d2Manifest,
-    searchConfig: searchConfigSelector(state),
-    filters: searchFiltersConfigSelector(state)
-  });
+  const statOrderSelector = createSelector(
+    (state: RootState) => settingsSelector(state).loStatSortOrder,
+    (loStatSortOrder: number[]) => loStatSortOrder.map((hash) => statHashToType[hash])
+  );
+
+  /** A selector to pull out all half tier general mods so we can quick add them to sets. */
+  const halfTierModsSelector = createSelector(
+    (state: RootState) => settingsSelector(state).loStatSortOrder,
+    (state: RootState) => state.manifest.d2Manifest,
+    (statOrder, defs) => {
+      const halfTierMods: PluggableInventoryItemDefinition[] = [];
+
+      // Get all the item hashes for the general sockets whitelisted plugs.
+      const reusablePlugs =
+        defs?.PlugSet.get(generalSocketReusablePlugSetHash)?.reusablePlugItems.map(
+          (p) => p.plugItemHash
+        ) || [];
+
+      for (const plugHash of reusablePlugs) {
+        const plug = defs?.InventoryItem.get(plugHash);
+
+        // Pick out the plugs which have a +5 value for an armour stat. This has the potential to break
+        // if bungie adds more mods with these stats (this looks pretty unlikely as of March 2021).
+        if (
+          isPluggableItem(plug) &&
+          isArmor2Mod(plug) &&
+          plug.investmentStats.some(
+            (stat) => stat.value === 5 && statValues.includes(stat.statTypeHash)
+          )
+        ) {
+          halfTierMods.push(plug);
+        }
+      }
+
+      // Sort the mods so they are in the same order as our stat filters. This ensures the desired stats
+      // will be enhanced first.
+      return halfTierMods.sort(
+        compareBy((mod) => {
+          const stat = mod.investmentStats.find(
+            (stat) => stat.value === 5 && statValues.includes(stat.statTypeHash)
+          );
+          return statOrder.indexOf(stat!.statTypeHash);
+        })
+      );
+    }
+  );
+
+  return (state: RootState): StoreProps => {
+    const { loAssumeMasterwork } = settingsSelector(state);
+    return {
+      statOrder: statOrderSelector(state),
+      assumeMasterwork: loAssumeMasterwork,
+      isPhonePortrait: state.shell.isPhonePortrait,
+      items: itemsSelector(state),
+      loadouts: loadoutsSelector(state),
+      filter: searchFilterSelector(state),
+      searchQuery: querySelector(state),
+      halfTierMods: halfTierModsSelector(state),
+    };
+  };
 }
 
 /**
  * The Loadout Optimizer screen
  */
-export class LoadoutBuilder extends React.Component<Props & UIViewInjectedProps, State> {
-  private subscriptions = new Subscriptions();
-  private filterItemsMemoized = memoizeOne(filterItems);
-  private filterSetsMemoized = memoizeOne(filterGeneratedSets);
-  private processMemoized = memoizeOne(process);
-  private getEnabledStats = memoizeOne(
-    (statFilters: Readonly<{ [statType in StatTypes]: MinMaxIgnored }>) =>
-      new Set(statKeys.filter((statType) => !statFilters[statType].ignored))
+function LoadoutBuilder({
+  stores,
+  statOrder,
+  assumeMasterwork,
+  isPhonePortrait,
+  items,
+  defs,
+  loadouts,
+  filter,
+  preloadedLoadout,
+  searchQuery,
+  halfTierMods,
+}: Props) {
+  const [
+    { lockedMap, lockedMods, selectedStoreId, statFilters, modPicker, perkPicker, compareSet },
+    lbDispatch,
+  ] = useLbState(stores, preloadedLoadout);
+
+  const selectedStore = stores.find((store) => store.id === selectedStoreId);
+
+  const enabledStats = useMemo(
+    () => new Set(statKeys.filter((statType) => !statFilters[statType].ignored)),
+    [statFilters]
   );
 
-  constructor(props: Props) {
-    super(props);
-    this.state = {
-      lockedMap: {},
-      statFilters: {
-        Mobility: { min: 0, max: 10, ignored: false },
-        Resilience: { min: 0, max: 10, ignored: false },
-        Recovery: { min: 0, max: 10, ignored: false },
-        Discipline: { min: 0, max: 10, ignored: false },
-        Intellect: { min: 0, max: 10, ignored: false },
-        Strength: { min: 0, max: 10, ignored: false }
-      },
-      minimumPower: 750,
-      query: '',
-      statOrder: statKeys,
-      selectedStoreId: props.storesLoaded ? props.stores.find((s) => s.current)!.id : undefined,
-      assumeMasterwork: false
-    };
+  const characterItems: ItemsByBucket | undefined = selectedStore && items[selectedStore.classType];
+
+  const equippedLoadout: Loadout | undefined = selectedStore && loadoutFromEquipped(selectedStore);
+  loadouts = equippedLoadout ? [...loadouts, equippedLoadout] : loadouts;
+
+  const filteredItems = useMemo(() => filterItems(characterItems, lockedMap, lockedMods, filter), [
+    characterItems,
+    lockedMap,
+    lockedMods,
+    filter,
+  ]);
+
+  const { result, processing } = useProcess(
+    selectedStore,
+    filteredItems,
+    lockedMap,
+    lockedMods,
+    assumeMasterwork,
+    statOrder,
+    statFilters
+  );
+
+  // A representation of the current loadout optimizer parameters that can be saved with generated loadouts
+  // TODO: replace some of these individual params with this object
+  const params: LoadoutParameters = useMemo(
+    () => ({
+      statConstraints: _.compact(
+        _.sortBy(Object.entries(statFilters), ([statName]) =>
+          statOrder.indexOf(statName as StatTypes)
+        ).map(([statName, minMax]) => {
+          if (minMax.ignored) {
+            return undefined;
+          }
+          const stat: StatConstraint = {
+            statHash: statHashes[statName],
+          };
+          if (minMax.min > 0) {
+            stat.minTier = minMax.min;
+          }
+          if (minMax.max < 10) {
+            stat.maxTier = minMax.max;
+          }
+          return stat;
+        })
+      ),
+      mods: lockedMods.map((mod) => mod.hash),
+      query: searchQuery,
+      assumeMasterworked: assumeMasterwork,
+    }),
+    [assumeMasterwork, lockedMods, searchQuery, statFilters, statOrder]
+  );
+
+  const combos = result?.combos || 0;
+  const combosWithoutCaps = result?.combosWithoutCaps || 0;
+  const sets = result?.sets;
+
+  const filteredSets = useMemo(() => sortGeneratedSets(lockedMap, statOrder, enabledStats, sets), [
+    lockedMap,
+    statOrder,
+    enabledStats,
+    sets,
+  ]);
+
+  // I dont think this can actually happen?
+  if (!selectedStore) {
+    return null;
   }
 
-  componentDidMount() {
-    this.subscriptions.add(
-      D2StoresService.getStoresStream(this.props.account).subscribe((stores) => {
-        if (!stores || !stores.length) {
-          return;
+  const menuContent = (
+    <div className={styles.menuContent}>
+      <FilterBuilds
+        statRanges={result?.statRanges}
+        stats={statFilters}
+        onStatFiltersChanged={(statFilters: LoadoutBuilderState['statFilters']) =>
+          lbDispatch({ type: 'statFiltersChanged', statFilters })
         }
+        defs={defs}
+        order={statOrder}
+        assumeMasterwork={assumeMasterwork}
+      />
 
-        if (!this.state.selectedStoreId) {
-          this.onCharacterChanged(stores.find((s) => s.current)!.id);
-        }
-      }),
+      <LockArmorAndPerks
+        selectedStore={selectedStore}
+        lockedMap={lockedMap}
+        lockedMods={lockedMods}
+        lbDispatch={lbDispatch}
+      />
+    </div>
+  );
 
-      // Disable refreshing stores, since it resets the scroll offset
-      refresh$.subscribe(() => queueAction(() => D2StoresService.reloadStores()))
-    );
-  }
-
-  componentWillUnmount() {
-    this.subscriptions.unsubscribe();
-  }
-
-  render() {
-    const {
-      storesLoaded,
-      stores,
-      isPhonePortrait,
-      items,
-      defs,
-      searchConfig,
-      filters
-    } = this.props;
-    const {
-      lockedMap,
-      selectedStoreId,
-      statFilters,
-      minimumPower,
-      query,
-      statOrder,
-      assumeMasterwork
-    } = this.state;
-
-    if (!storesLoaded || !defs || !selectedStoreId) {
-      return <Loading />;
-    }
-
-    const store = stores.find((s) => s.id === selectedStoreId)!;
-
-    if (!items[store.classType]) {
-      return <Loading />;
-    }
-
-    const filter = filters.filterFunction(query);
-
-    let filteredItems: ItemsByBucket = {};
-    let processedSets: readonly ArmorSet[] = [];
-    let filteredSets: readonly ArmorSet[] = [];
-    let combos = 0;
-    let combosWithoutCaps = 0;
-    let processError;
-    const enabledStats = this.getEnabledStats(statFilters);
-    try {
-      filteredItems = this.filterItemsMemoized(items[store.classType], lockedMap, filter);
-      const result = this.processMemoized(filteredItems, lockedMap, store.id, assumeMasterwork);
-      processedSets = result.sets;
-      combos = result.combos;
-      combosWithoutCaps = result.combosWithoutCaps;
-      filteredSets = this.filterSetsMemoized(
-        processedSets,
-        minimumPower,
-        lockedMap,
-        statFilters,
-        statOrder,
-        enabledStats
-      );
-    } catch (e) {
-      console.error(e);
-      processError = e;
-    }
-
-    const menuContent = (
-      <div className={styles.menuContent}>
-        <SearchFilterInput
-          searchConfig={searchConfig}
-          placeholder={t('LoadoutBuilder.SearchPlaceholder')}
-          onQueryChanged={this.onQueryChanged}
+  return (
+    <PageWithMenu className={styles.page}>
+      <PageWithMenu.Menu className={styles.menu}>
+        <CharacterSelect
+          selectedStore={selectedStore}
+          stores={stores}
+          isPhonePortrait={isPhonePortrait}
+          onCharacterChanged={(storeId: string) => lbDispatch({ type: 'changeCharacter', storeId })}
         />
+        {isPhonePortrait ? (
+          <CollapsibleTitle sectionId="lb-filter" title={t('LoadoutBuilder.Filter')}>
+            {menuContent}
+          </CollapsibleTitle>
+        ) : (
+          menuContent
+        )}
+      </PageWithMenu.Menu>
 
-        <FilterBuilds
-          sets={processedSets}
-          selectedStore={store as D2Store}
-          minimumPower={minimumPower}
-          stats={statFilters}
-          onMinimumPowerChanged={this.onMinimumPowerChanged}
-          onStatFiltersChanged={this.onStatFiltersChanged}
-          defs={defs}
-          order={statOrder}
-          onStatOrderChanged={this.onStatOrderChanged}
-          assumeMasterwork={assumeMasterwork}
-          onMasterworkAssumptionChange={this.onMasterworkAssumptionChange}
-        />
-
-        <LockArmorAndPerks
-          items={filteredItems}
-          selectedStore={store}
-          lockedMap={lockedMap}
-          onLockedMapChanged={this.onLockedMapChanged}
-        />
-      </div>
-    );
-
-    return (
-      <PageWithMenu className={styles.page}>
-        <PageWithMenu.Menu className={styles.menu}>
-          <CharacterSelect
-            selectedStore={store}
-            stores={stores}
-            vertical={!isPhonePortrait}
-            isPhonePortrait={isPhonePortrait}
-            onCharacterChanged={this.onCharacterChanged}
-          />
-          {isPhonePortrait ? (
-            <CollapsibleTitle sectionId="lb-filter" title={t('LoadoutBuilder.Filter')}>
-              {menuContent}
-            </CollapsibleTitle>
-          ) : (
-            menuContent
+      <PageWithMenu.Contents>
+        <AnimatePresence>
+          {processing && (
+            <motion.div
+              className={styles.processing}
+              initial={{ opacity: 0, y: -50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -50 }}
+              transition={{ ease: 'easeInOut', duration: 0.5 }}
+            >
+              <div>{t('LoadoutBuilder.ProcessingSets', { character: selectedStore.name })}</div>
+              <AppIcon icon={refreshIcon} spinning={true} />
+            </motion.div>
           )}
-        </PageWithMenu.Menu>
-
-        <PageWithMenu.Contents>
-          {processError ? (
-            <div className="dim-error">
-              <h2>{t('ErrorBoundary.Title')}</h2>
-              <div>{processError.message}</div>
-            </div>
-          ) : (
-            <GeneratedSets
-              sets={filteredSets}
-              combos={combos}
-              combosWithoutCaps={combosWithoutCaps}
-              isPhonePortrait={isPhonePortrait}
+        </AnimatePresence>
+        {filteredSets && (
+          <GeneratedSets
+            sets={filteredSets}
+            combos={combos}
+            combosWithoutCaps={combosWithoutCaps}
+            lockedMap={lockedMap}
+            selectedStore={selectedStore}
+            lbDispatch={lbDispatch}
+            defs={defs}
+            statOrder={statOrder}
+            enabledStats={enabledStats}
+            lockedMods={lockedMods}
+            loadouts={loadouts}
+            params={params}
+            halfTierMods={halfTierMods}
+          />
+        )}
+        {modPicker.open &&
+          ReactDOM.createPortal(
+            <ModPicker
+              classType={selectedStore.classType}
+              lockedMods={lockedMods}
+              initialQuery={modPicker.initialQuery}
+              onAccept={(newLockedMods: PluggableInventoryItemDefinition[]) =>
+                lbDispatch({
+                  type: 'lockedModsChanged',
+                  lockedMods: newLockedMods,
+                })
+              }
+              onClose={() => lbDispatch({ type: 'closeModPicker' })}
+            />,
+            document.body
+          )}
+        {perkPicker.open &&
+          ReactDOM.createPortal(
+            <PerkPicker
+              classType={selectedStore.classType}
               lockedMap={lockedMap}
-              selectedStore={store}
-              onLockedMapChanged={this.onLockedMapChanged}
+              initialQuery={perkPicker.initialQuery}
+              onClose={() => lbDispatch({ type: 'closePerkPicker' })}
+              lbDispatch={lbDispatch}
+            />,
+            document.body
+          )}
+        {compareSet &&
+          ReactDOM.createPortal(
+            <CompareDrawer
+              set={compareSet}
+              loadouts={loadouts}
+              lockedMods={lockedMods}
               defs={defs}
+              classType={selectedStore.classType}
               statOrder={statOrder}
               enabledStats={enabledStats}
-            />
+              assumeMasterwork={assumeMasterwork}
+              onClose={() => lbDispatch({ type: 'closeCompareDrawer' })}
+            />,
+            document.body
           )}
-        </PageWithMenu.Contents>
-
-        <LoadoutDrawer />
-      </PageWithMenu>
-    );
-  }
-
-  /**
-   * Handle when selected character changes
-   * Recomputes matched sets
-   */
-  private onCharacterChanged = (storeId: string) => {
-    this.setState({
-      selectedStoreId: storeId,
-      lockedMap: {},
-      statFilters: {
-        Mobility: { min: 0, max: 10, ignored: false },
-        Resilience: { min: 0, max: 10, ignored: false },
-        Recovery: { min: 0, max: 10, ignored: false },
-        Discipline: { min: 0, max: 10, ignored: false },
-        Intellect: { min: 0, max: 10, ignored: false },
-        Strength: { min: 0, max: 10, ignored: false }
-      },
-      minimumPower: 0
-    });
-  };
-
-  private onStatFiltersChanged = (statFilters: State['statFilters']) =>
-    this.setState({ statFilters });
-
-  private onMinimumPowerChanged = (minimumPower: number) => this.setState({ minimumPower });
-
-  private onQueryChanged = (query: string) => this.setState({ query });
-
-  private onStatOrderChanged = (statOrder: StatTypes[]) => this.setState({ statOrder });
-
-  private onLockedMapChanged = (lockedMap: State['lockedMap']) => this.setState({ lockedMap });
-
-  private onMasterworkAssumptionChange = (assumeMasterwork: boolean) =>
-    this.setState({ assumeMasterwork });
+      </PageWithMenu.Contents>
+    </PageWithMenu>
+  );
 }
 
 export default connect<StoreProps>(mapStateToProps)(LoadoutBuilder);

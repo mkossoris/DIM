@@ -1,51 +1,113 @@
-import { WishListRoll, DimWishList, WishListAndInfo } from './types';
-import _ from 'lodash';
+import { emptySet } from 'app/utils/empty';
+import { timer, warnLog } from 'app/utils/log';
+import { DimWishList, WishListAndInfo, WishListRoll } from './types';
 
-const EMPTY_NUMBER_SET = new Set<number>();
-let _blockNotes: string | undefined;
-
-/* Utilities for reading a wishlist file */
+/**
+ * The title should follow the following format:
+ * title:This Is My Source File Title.
+ */
+const titleLabel = 'title:';
+/**
+ * The description should follow the following format:
+ * description:This Is My Source File Description And Maybe It Is Longer.
+ */
+const descriptionLabel = 'description:';
+/**
+ * Notes apply to all rolls until an empty line or comment.
+ */
+const notesLabel = '//notes:';
 
 /**
  * Extracts rolls, title, and description from the meat of
  * a wish list text file.
  */
 export function toWishList(fileText: string): WishListAndInfo {
-  return {
-    wishListRolls: toWishListRolls(fileText),
-    title: getTitle(fileText),
-    description: getDescription(fileText)
-  };
+  const stopTimer = timer('Parse wish list');
+  try {
+    const wishList: WishListAndInfo = {
+      wishListRolls: [],
+      title: undefined,
+      description: undefined,
+    };
+
+    let blockNotes: string | undefined = undefined;
+    const seen = new Set<string>();
+    let dups = 0;
+
+    const lines = fileText.split('\n');
+    for (const line of lines) {
+      if (line.startsWith(notesLabel)) {
+        blockNotes = parseBlockNoteLine(line);
+      } else if (line.length === 0 || line.startsWith('//')) {
+        // Empty lines and comments reset the block note
+        blockNotes = undefined;
+      } else if (!wishList.title && line.startsWith(titleLabel)) {
+        wishList.title = line.slice(titleLabel.length);
+      } else if (!wishList.description && line.startsWith(descriptionLabel)) {
+        wishList.description = line.slice(descriptionLabel.length);
+      } else {
+        const roll =
+          toDimWishListRoll(line, blockNotes) ||
+          toBansheeWishListRoll(line, blockNotes) ||
+          toDtrWishListRoll(line, blockNotes);
+
+        if (roll) {
+          const rollHash = `${roll.itemHash};${roll.isExpertMode};${sortedSetToString(
+            roll.recommendedPerks
+          )}`;
+          if (!seen.has(rollHash)) {
+            seen.add(rollHash);
+            wishList.wishListRolls.push(roll);
+          } else {
+            dups++;
+          }
+        }
+      }
+    }
+
+    if (dups > 0) {
+      warnLog('wishlist', 'Discarded', dups, 'duplicate rolls from wish list');
+    }
+    return wishList;
+  } finally {
+    stopTimer();
+  }
 }
 
 function expectedMatchResultsLength(matchResults: RegExpMatchArray): boolean {
   return matchResults.length === 4;
 }
 
-/** Side effect-y function that will set/unset block notes */
-function parseBlockNoteLine(blockNoteLine: string): null {
-  const blockMatchResults = blockNoteLine.match(/^\/\/notes:(?<blockNotes>.*)/);
+const blockNoteLineRegex = /^\/\/notes:(?<blockNotes>[^|]*)/;
 
-  _blockNotes = blockMatchResults?.groups?.blockNotes;
-
-  return null;
+/** Parse out notes from a line */
+function parseBlockNoteLine(blockNoteLine: string): string | undefined {
+  const blockMatchResults = blockNoteLineRegex.exec(blockNoteLine);
+  return blockMatchResults?.groups?.blockNotes;
 }
 
 function getPerks(matchResults: RegExpMatchArray): Set<number> {
   if (!matchResults.groups || matchResults.groups.itemPerks === undefined) {
-    return EMPTY_NUMBER_SET;
+    return emptySet<number>();
   }
 
-  return new Set(
-    matchResults[2]
-      .split(',')
-      .map(Number)
-      .filter((perkHash) => perkHash > 0)
-  );
+  const split = matchResults[2].split(',');
+
+  const s = new Set<number>();
+  for (const perkHash of split) {
+    const n = Number(perkHash);
+    if (n > 0) {
+      s.add(n);
+    }
+  }
+
+  return s;
 }
 
-function getNotes(matchResults: RegExpMatchArray): string | undefined {
-  return matchResults.groups?.wishListNotes || _blockNotes;
+function getNotes(matchResults: RegExpMatchArray, blockNotes?: string): string | undefined {
+  return matchResults.groups?.wishListNotes && matchResults.groups.wishListNotes.length > 1
+    ? matchResults.groups.wishListNotes
+    : blockNotes;
 }
 
 function getItemHash(matchResults: RegExpMatchArray): number {
@@ -56,18 +118,9 @@ function getItemHash(matchResults: RegExpMatchArray): number {
   return Number(matchResults.groups.itemHash);
 }
 
-function toDtrWishListRoll(dtrTextLine: string): WishListRoll | null {
-  if (!dtrTextLine || dtrTextLine.length === 0) {
-    return null;
-  }
-
-  if (dtrTextLine.startsWith('//')) {
-    return null;
-  }
-
-  const matchResults = dtrTextLine.match(
-    /^https:\/\/destinytracker\.com\/destiny-2\/db\/items\/(?<itemHash>\d+)(?:.*)?perks=(?<itemPerks>[\d,]*)(?:#notes:)?(?<wishListNotes>.*)?/
-  );
+const dtrTextLineRegex = /^https:\/\/destinytracker\.com\/destiny-2\/db\/items\/(?<itemHash>\d+)(?:.*)?perks=(?<itemPerks>[\d,]*)(?:#notes:)?(?<wishListNotes>[^|]*)?/;
+function toDtrWishListRoll(dtrTextLine: string, blockNotes?: string): WishListRoll | null {
+  const matchResults = dtrTextLineRegex.exec(dtrTextLine);
 
   if (!matchResults || !expectedMatchResultsLength(matchResults)) {
     return null;
@@ -75,29 +128,21 @@ function toDtrWishListRoll(dtrTextLine: string): WishListRoll | null {
 
   const itemHash = getItemHash(matchResults);
   const recommendedPerks = getPerks(matchResults);
-  const notes = getNotes(matchResults);
+  const notes = getNotes(matchResults, blockNotes);
 
   return {
     itemHash,
     recommendedPerks,
     isExpertMode: false,
-    notes
+    notes,
   };
 }
+
+const bansheeTextLineRegex = /^https:\/\/banshee-44\.com\/\?weapon=(?<itemHash>\d.+)&socketEntries=(?<itemPerks>[\d,]*)(?:#notes:)?(?<wishListNotes>[^|]*)?/;
 
 /** Translate a single banshee-44.com URL -> WishListRoll. */
-function toBansheeWishListRoll(bansheeTextLine: string): WishListRoll | null {
-  if (!bansheeTextLine || bansheeTextLine.length === 0) {
-    return null;
-  }
-
-  if (bansheeTextLine.startsWith('//')) {
-    return null;
-  }
-
-  const matchResults = bansheeTextLine.match(
-    /^https:\/\/banshee-44\.com\/\?weapon=(?<itemHash>\d.+)&socketEntries=(?<itemPerks>[\d,]*)(?:#notes:)?(?<wishListNotes>.*)?/
-  );
+function toBansheeWishListRoll(bansheeTextLine: string, blockNotes?: string): WishListRoll | null {
+  const matchResults = bansheeTextLineRegex.exec(bansheeTextLine);
 
   if (!matchResults || !expectedMatchResultsLength(matchResults)) {
     return null;
@@ -105,28 +150,19 @@ function toBansheeWishListRoll(bansheeTextLine: string): WishListRoll | null {
 
   const itemHash = getItemHash(matchResults);
   const recommendedPerks = getPerks(matchResults);
-  const notes = getNotes(matchResults);
+  const notes = getNotes(matchResults, blockNotes);
 
   return {
     itemHash,
     recommendedPerks,
     isExpertMode: false,
-    notes
+    notes,
   };
 }
 
-function toDimWishListRoll(textLine: string): WishListRoll | null {
-  if (!textLine || textLine.length === 0) {
-    return null;
-  }
-
-  if (textLine.startsWith('//')) {
-    return null;
-  }
-
-  const matchResults = textLine.match(
-    /^dimwishlist:item=(?<itemHash>-?\d+)(?:&perks=)?(?<itemPerks>[\d|,]*)?(?:#notes:)?(?<wishListNotes>.*)?/
-  );
+const textLineRegex = /^dimwishlist:item=(?<itemHash>-?\d+)(?:&perks=)?(?<itemPerks>[\d|,]*)?(?:#notes:)?(?<wishListNotes>[^|]*)?/;
+function toDimWishListRoll(textLine: string, blockNotes?: string): WishListRoll | null {
+  const matchResults = textLineRegex.exec(textLine);
 
   if (!matchResults || !expectedMatchResultsLength(matchResults)) {
     return null;
@@ -135,7 +171,7 @@ function toDimWishListRoll(textLine: string): WishListRoll | null {
   let itemHash = getItemHash(matchResults);
   const isUndesirable = itemHash < 0 && itemHash !== DimWishList.WildcardItemId;
   const recommendedPerks = getPerks(matchResults);
-  const notes = getNotes(matchResults);
+  const notes = getNotes(matchResults, blockNotes);
 
   if (isUndesirable && itemHash !== DimWishList.WildcardItemId) {
     itemHash = Math.abs(itemHash);
@@ -146,102 +182,10 @@ function toDimWishListRoll(textLine: string): WishListRoll | null {
     recommendedPerks,
     isExpertMode: true,
     notes,
-    isUndesirable
+    isUndesirable,
   };
 }
 
-/** Newline-separated banshee-44.com text -> WishListRolls. */
-function toWishListRolls(fileText: string): WishListRoll[] {
-  const textArray = fileText.split('\n');
-
-  const rolls = _.compact(
-    textArray.map(
-      (line) =>
-        toDimWishListRoll(line) ||
-        toBansheeWishListRoll(line) ||
-        toDtrWishListRoll(line) ||
-        parseBlockNoteLine(line)
-    )
-  );
-
-  function eqSet<T>(as: Set<T>, bs: Set<T>) {
-    if (as.size !== bs.size) {
-      return false;
-    }
-    for (const a of as) {
-      if (!bs.has(a)) {
-        return false;
-      }
-    }
-    return true;
-  }
-  return Object.values(
-    _.mapValues(
-      _.groupBy(rolls, (r) => r.itemHash),
-      (v) =>
-        _.uniqWith(
-          v,
-          (v1, v2) =>
-            v1.isExpertMode === v2.isExpertMode && eqSet(v1.recommendedPerks, v2.recommendedPerks)
-        )
-    )
-  ).flat();
-}
-
-function findMatch(sourceFileLine: string, regExToMatch: RegExp): string | undefined {
-  if (!sourceFileLine || !sourceFileLine.length) {
-    return undefined;
-  }
-
-  const matchResults = sourceFileLine.match(regExToMatch);
-
-  if (!matchResults || matchResults.length !== 2) {
-    return undefined;
-  }
-
-  return matchResults[1];
-}
-
-function findTitle(sourceFileLine: string): string | undefined {
-  return findMatch(sourceFileLine, /^title:(.*)/);
-}
-
-function findDescription(sourceFileLine: string): string | undefined {
-  return findMatch(sourceFileLine, /^description:(.*)/);
-}
-
-/*
- * Will extract the title of a DIM wish list from a source file.
- * The title should follow the following format:
- * title:This Is My Source File Title.
- *
- * It will only look at the first 20 lines of the file for the title,
- * and the first line that looks like a title will be returned.
- */
-function getTitle(sourceFileText: string): string | undefined {
-  if (!sourceFileText) {
-    return undefined;
-  }
-
-  const sourceFileLineArray = sourceFileText.split('\n').slice(0, 20);
-
-  return sourceFileLineArray.map(findTitle).find((s) => s);
-}
-
-/*
- * Will extract the description of a DIM wish list from a source file.
- * The description should follow the following format:
- * description:This Is My Source File Description And Maybe It Is Longer.
- *
- * It will only look at the first 20 lines of the file for the description,
- * and the first line that looks like a description will be returned.
- */
-function getDescription(sourceFileText: string): string | undefined {
-  if (!sourceFileText) {
-    return undefined;
-  }
-
-  const sourceFileLineArray = sourceFileText.split('\n').slice(0, 20);
-
-  return sourceFileLineArray.map(findDescription).find(Boolean);
+function sortedSetToString(set: Set<number>): string {
+  return [...set].sort((a, b) => a - b).toString();
 }

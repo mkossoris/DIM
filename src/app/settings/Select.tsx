@@ -1,13 +1,13 @@
-import React from 'react';
-import { Settings } from './reducer';
 import _ from 'lodash';
+import React from 'react';
+import { Settings } from './initial-settings';
 
 export default function Select({
   label,
   value,
   name,
   onChange,
-  options
+  options,
 }: {
   label: string;
   value: string | number;
@@ -35,7 +35,7 @@ export default function Select({
 export function mapToOptions(map: { [key: string]: string }) {
   return _.map(map, (value, key) => ({
     name: value,
-    value: key
+    value: key,
   }));
 }
 

@@ -1,19 +1,21 @@
-import copy from 'fast-copy';
 import { t } from 'app/i18next-t';
+import { ItemFilter } from 'app/search/filter-types';
+import { isD1Item, itemCanBeEquippedBy } from 'app/utils/item-utils';
+import { StatHashes } from 'data/d2/generated-enums';
+import copy from 'fast-copy';
 import _ from 'lodash';
-import { optimalLoadout, newLoadout } from './loadout-utils';
-import { StoreServiceType, DimStore } from '../inventory/store-types';
 import { DimItem } from '../inventory/item-types';
-import { DestinyClass } from 'bungie-api-ts/destiny2';
+import { DimStore } from '../inventory/store-types';
 import { Loadout } from './loadout-types';
+import { convertToLoadoutItem, newLoadout, optimalItemSet, optimalLoadout } from './loadout-utils';
 
 /**
  *  A dynamic loadout set up to level weapons and armor
  */
-export function itemLevelingLoadout(storeService: StoreServiceType, store: DimStore): Loadout {
-  const applicableItems = storeService.getAllItems().filter(
+export function itemLevelingLoadout(allItems: DimItem[], store: DimStore): Loadout {
+  const applicableItems = allItems.filter(
     (i) =>
-      i.canBeEquippedBy(store) &&
+      itemCanBeEquippedBy(i, store) &&
       i.talentGrid &&
       !(i.talentGrid as any).xpComplete && // Still need XP
       i.hash !== 2168530918 && // Husk of the pit has a weirdo one-off xp mechanic
@@ -22,7 +24,7 @@ export function itemLevelingLoadout(storeService: StoreServiceType, store: DimSt
       i.hash !== 1425539750
   );
 
-  const bestItemFn = (item) => {
+  const bestItemFn = (item: DimItem) => {
     let value = 0;
 
     if (item.owner === store.id) {
@@ -46,7 +48,9 @@ export function itemLevelingLoadout(storeService: StoreServiceType, store: DimSt
     value += ['Common', 'Uncommon', 'Rare', 'Legendary', 'Exotic'].indexOf(item.tier) * 10;
 
     // Choose the item w/ the highest XP
-    value += 10 * (item.talentGrid.totalXP / item.talentGrid.totalXPRequired);
+    if (isD1Item(item) && item.talentGrid) {
+      value += 10 * (item.talentGrid.totalXP / item.talentGrid.totalXPRequired);
+    }
 
     value += item.primStat ? item.primStat.value / 1000 : 0;
 
@@ -59,26 +63,40 @@ export function itemLevelingLoadout(storeService: StoreServiceType, store: DimSt
 /**
  * A loadout that's dynamically calculated to maximize Light level (preferring not to change currently-equipped items)
  */
-export function maxLightLoadout(storeService: StoreServiceType, store: DimStore): Loadout {
-  const statHashes = new Set([
-    1480404414, // D2 Attack
-    3897883278, // D1 & D2 Defense
-    368428387 // D1 Attack
-  ]);
-
-  const applicableItems = storeService.getAllItems().filter(
-    (i) =>
-      (i.canBeEquippedBy(store) ||
-        (i.location.inPostmaster &&
-          (i.classType === DestinyClass.Unknown || i.classType === store.classType) &&
-          // nothing we are too low-level to equip
-          i.equipRequiredLevel <= store.level)) &&
-      i.primStat?.value && // has a primary stat (sanity check)
-      statHashes.has(i.primStat.statHash) // one of our selected stats
+export function maxLightLoadout(allItems: DimItem[], store: DimStore): Loadout {
+  const { equippable } = maxLightItemSet(allItems, store);
+  return newLoadout(
+    store.destinyVersion === 2 ? t('Loadouts.MaximizePower') : t('Loadouts.MaximizeLight'),
+    equippable.map((i) => convertToLoadoutItem(i, true))
   );
+}
 
-  const bestItemFn = (item) => {
-    let value = item.primStat.value;
+const powerStatHashes = [
+  StatHashes.Attack, // D2 Attack
+  StatHashes.Defense, // D1 & D2 Defense
+  368428387, // D1 Attack
+];
+
+/**
+ * A loadout that's dynamically calculated to maximize Light level (preferring not to change currently-equipped items)
+ */
+export function maxLightItemSet(
+  allItems: DimItem[],
+  store: DimStore
+): ReturnType<typeof optimalItemSet> {
+  const applicableItems: DimItem[] = [];
+  for (const i of allItems) {
+    if (
+      itemCanBeEquippedBy(i, store, true) &&
+      i.primStat?.value && // has a primary stat (sanity check)
+      powerStatHashes.includes(i.primStat.statHash) // one of our selected stats
+    ) {
+      applicableItems.push(i);
+    }
+  }
+
+  const bestItemFn = (item: DimItem) => {
+    let value = item.primStat?.value ?? 0;
 
     // Break ties when items have the same stats. Note that this should only
     // add less than 0.25 total, since in the exotics special case there can be
@@ -98,24 +116,16 @@ export function maxLightLoadout(storeService: StoreServiceType, store: DimStore)
     return value;
   };
 
-  return optimalLoadout(applicableItems, bestItemFn, t('Loadouts.MaximizeLight'));
+  return optimalItemSet(applicableItems, bestItemFn);
 }
 
 /**
  * A loadout to maximize a specific stat
  */
-export function maxStatLoadout(
-  statHash: number,
-  storeService: StoreServiceType,
-  store: DimStore
-): Loadout {
-  const applicableItems = storeService.getAllItems().filter(
+export function maxStatLoadout(statHash: number, allItems: DimItem[], store: DimStore): Loadout {
+  const applicableItems = allItems.filter(
     (i) =>
-      (i.canBeEquippedBy(store) ||
-        (i.location.inPostmaster &&
-          (i.classType === DestinyClass.Unknown || i.classType === store.classType) &&
-          // nothing we are too low-level to equip
-          i.equipRequiredLevel <= store.level)) &&
+      itemCanBeEquippedBy(i, store, true) &&
       i.primStat?.value && // has a primary stat (sanity check)
       i.stats &&
       i.stats.some((stat) => stat.statHash === statHash) // contains our selected stat
@@ -149,14 +159,12 @@ export function maxStatLoadout(
  * A dynamic loadout set up to level weapons and armor
  */
 export function gatherEngramsLoadout(
-  storeService: StoreServiceType,
+  allItems: DimItem[],
   options: { exotics: boolean } = { exotics: false }
 ): Loadout {
-  const engrams = storeService
-    .getAllItems()
-    .filter(
-      (i) => i.isEngram && !i.location.inPostmaster && (options.exotics ? true : !i.isExotic)
-    );
+  const engrams = allItems.filter(
+    (i) => i.isEngram && !i.location.inPostmaster && (options.exotics ? true : !i.isExotic)
+  );
 
   if (engrams.length === 0) {
     let engramWarning = t('Loadouts.NoEngrams');
@@ -176,53 +184,17 @@ export function gatherEngramsLoadout(
     }
   );
 
-  // Copy the items and mark them equipped and put them in arrays, so they look like a loadout
-  const finalItems = {};
-  _.forIn(itemsByType, (items, type) => {
-    if (items) {
-      finalItems[type.toLowerCase()] = items.map((i, ..._args) => copy(i));
-    }
-  });
+  const finalItems = Object.values(itemsByType)
+    .flat()
+    .map((i) => convertToLoadoutItem(i, false));
 
   return newLoadout(t('Loadouts.GatherEngrams'), finalItems);
 }
 
-export function gatherTokensLoadout(storeService: StoreServiceType): Loadout {
-  let tokens = storeService
-    .getAllItems()
-    .filter((i) => i.isDestiny2() && i.itemCategoryHashes.includes(2088636411) && !i.notransfer);
-
-  if (tokens.length === 0) {
-    throw new Error(t('Loadouts.NoTokens'));
-  }
-
-  tokens = addUpStackables(tokens);
-
-  const itemsByType = _.groupBy(tokens, (t) => t.type);
-
-  // Copy the items and put them in arrays, so they look like a loadout
-  const finalItems = {};
-  _.forIn(itemsByType, (items, type) => {
-    if (items) {
-      finalItems[type.toLowerCase()] = items;
-    }
-  });
-
-  return newLoadout(t('Loadouts.GatherTokens'), finalItems);
-}
-
 /**
- * Move items matching the current search.
+ * Move a list of items to a store
  */
-export function searchLoadout(
-  storeService: StoreServiceType,
-  store: DimStore,
-  searchFilter: (item: DimItem) => boolean
-): Loadout {
-  let items = storeService
-    .getAllItems()
-    .filter((i) => !i.location.inPostmaster && !i.notransfer && searchFilter(i));
-
+export function itemMoveLoadout(items: DimItem[], store: DimStore): Loadout {
   items = addUpStackables(items);
 
   const itemsByType = _.mapValues(
@@ -231,21 +203,29 @@ export function searchLoadout(
   );
 
   // Copy the items and mark them equipped and put them in arrays, so they look like a loadout
-  const finalItems = {};
-  _.forIn(itemsByType, (items, type) => {
-    if (items) {
-      finalItems[type.toLowerCase()] = items.map((i) => {
-        const copiedItem = copy(i);
-        copiedItem.equipped = false;
-        return copiedItem;
-      });
-    }
-  });
+  const finalItems = Object.values(itemsByType)
+    .flat()
+    .map((i) => convertToLoadoutItem(i, false));
 
   return newLoadout(t('Loadouts.FilteredItems'), finalItems);
 }
 
-function limitToBucketSize(items: DimItem[], isVault) {
+/**
+ * Move items matching the current search.
+ */
+export function searchLoadout(
+  allItems: DimItem[],
+  store: DimStore,
+  searchFilter: ItemFilter
+): Loadout {
+  const items = allItems.filter(
+    (i) => !i.location.inPostmaster && !i.notransfer && searchFilter(i)
+  );
+
+  return itemMoveLoadout(items, store);
+}
+
+function limitToBucketSize(items: DimItem[], isVault: boolean) {
   if (!items.length) {
     return [];
   }
@@ -277,37 +257,31 @@ function addUpStackables(items: DimItem[]) {
   });
 }
 
-export function randomLoadout(storeService: StoreServiceType, weaponsOnly = false) {
-  const store = storeService.getActiveStore();
-  if (!store) {
-    return null;
-  }
+const randomLoadoutTypes = new Set([
+  'Class',
+  'Primary',
+  'Special',
+  'Heavy',
+  'Kinetic',
+  'Energy',
+  'Power',
+  'Helmet',
+  'Gauntlets',
+  'Chest',
+  'Leg',
+  'ClassItem',
+  'Artifact',
+  'Ghost',
+]);
 
-  const types = new Set(
-    weaponsOnly
-      ? ['Class', 'Primary', 'Special', 'Heavy', 'Kinetic', 'Energy', 'Power']
-      : [
-          'Class',
-          'Primary',
-          'Special',
-          'Heavy',
-          'Kinetic',
-          'Energy',
-          'Power',
-          'Helmet',
-          'Gauntlets',
-          'Chest',
-          'Leg',
-          'ClassItem',
-          'Artifact',
-          'Ghost'
-        ]
-  );
-
+/**
+ * Create a random loadout from items across the whole inventory. Optionally filter items with the filter method.
+ */
+export function randomLoadout(store: DimStore, allItems: DimItem[], filter: ItemFilter) {
   // Any item equippable by this character in the given types
-  const applicableItems = storeService
-    .getAllItems()
-    .filter((i) => types.has(i.type) && i.canBeEquippedBy(store));
+  const applicableItems = allItems.filter(
+    (i) => randomLoadoutTypes.has(i.type) && itemCanBeEquippedBy(i, store) && filter(i)
+  );
 
   // Use "random" as the value function
   return optimalLoadout(applicableItems, () => Math.random(), t('Loadouts.Random'));

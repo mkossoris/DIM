@@ -1,14 +1,10 @@
-import _ from 'lodash';
+import { dimNeedsUpdate$, reloadDIM } from 'app/register-service-worker';
+import { RootState } from 'app/store/types';
 import React from 'react';
+import { connect } from 'react-redux';
+import { isDragging } from '../inventory/DraggableInventoryItem';
 import { loadingTracker } from '../shell/loading-tracker';
 import { refresh as triggerRefresh, refresh$ } from '../shell/refresh';
-import { isDragging } from '../inventory/DraggableInventoryItem';
-import { Subscription } from 'rxjs';
-import { filter, take } from 'rxjs/operators';
-import { dimNeedsUpdate } from 'app/register-service-worker';
-import { reloadDIM } from 'app/whats-new/WhatsNewLink';
-import { connect } from 'react-redux';
-import { RootState } from 'app/store/reducers';
 
 interface StoreProps {
   /** Don't allow refresh more often than this many seconds. */
@@ -19,6 +15,7 @@ interface StoreProps {
   autoRefresh: boolean;
   /** Whether to refresh profile when the page becomes visible after being in the background. */
   refreshProfileOnVisible: boolean;
+  hasSearchQuery: boolean;
 }
 
 function mapStateToProps(state: RootState): StoreProps {
@@ -26,14 +23,15 @@ function mapStateToProps(state: RootState): StoreProps {
     destinyProfileMinimumRefreshInterval,
     destinyProfileRefreshInterval,
     autoRefresh,
-    refreshProfileOnVisible
-  } = state.dimApi.settings;
+    refreshProfileOnVisible,
+  } = state.dimApi.globalSettings;
 
   return {
     destinyProfileRefreshInterval,
     destinyProfileMinimumRefreshInterval,
     autoRefresh,
-    refreshProfileOnVisible
+    refreshProfileOnVisible,
+    hasSearchQuery: Boolean(state.shell.searchQuery),
   };
 }
 
@@ -46,7 +44,7 @@ type Props = StoreProps;
 class ActivityTracker extends React.Component<Props> {
   private lastRefreshTimestamp = 0;
   private refreshAccountDataInterval?: number;
-  private refreshSubscription: Subscription;
+  private refreshSubscription: () => void;
 
   componentDidMount() {
     document.addEventListener('visibilitychange', this.visibilityHandler);
@@ -71,7 +69,7 @@ class ActivityTracker extends React.Component<Props> {
     document.removeEventListener('visibilitychange', this.visibilityHandler);
     document.removeEventListener('online', this.refreshAccountData);
     this.clearTimer();
-    this.refreshSubscription.unsubscribe();
+    this.refreshSubscription();
   }
 
   render() {
@@ -117,7 +115,7 @@ class ActivityTracker extends React.Component<Props> {
       if (this.props.refreshProfileOnVisible) {
         this.refreshAccountData();
       }
-    } else if (dimNeedsUpdate) {
+    } else if (dimNeedsUpdate$.getCurrentValue() && !this.props.hasSearchQuery) {
       // Sneaky updates - if DIM is hidden and needs an update, do the update.
       reloadDIM();
     }
@@ -134,13 +132,12 @@ class ActivityTracker extends React.Component<Props> {
       this.refresh();
     } else if (!dimHasNoActivePromises) {
       // Try again once the loading tracker goes back to inactive
-      loadingTracker.active$
-        .pipe(
-          filter((active) => !active),
-          take(1)
-        )
-        .toPromise()
-        .then(this.refreshAccountData);
+      const unsubscribe = loadingTracker.active$.subscribe((active) => {
+        if (!active) {
+          unsubscribe();
+          this.refreshAccountData();
+        }
+      });
     } else {
       // If we didn't refresh because things were disabled, keep the timer going
       this.resetTimer();

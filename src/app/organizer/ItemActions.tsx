@@ -1,10 +1,17 @@
-import React from 'react';
+import Dropdown, { Option } from 'app/dim-ui/Dropdown';
 import { t } from 'app/i18next-t';
-import styles from './ItemActions.m.scss';
-import { AppIcon, lockIcon } from 'app/shell/icons';
-import DropDown from './DropDown';
 import { itemTagList, TagInfo } from 'app/inventory/dim-item-info';
 import { DimStore } from 'app/inventory/store-types';
+import {
+  AppIcon,
+  lockIcon,
+  moveIcon,
+  stickyNoteIcon,
+  tagIcon,
+  unlockedIcon,
+} from 'app/shell/icons';
+import React from 'react';
+import styles from './ItemActions.m.scss';
 
 const bulkItemTags = Array.from(itemTagList);
 bulkItemTags.push({ type: 'clear', label: 'Tags.ClearTag' });
@@ -13,59 +20,85 @@ function ItemActions({
   stores,
   itemsAreSelected,
   onLock,
+  onNote,
   onTagSelectedItems,
-  onMoveSelectedItems
+  onMoveSelectedItems,
 }: {
   stores: DimStore[];
   itemsAreSelected: boolean;
-  onLock(e): Promise<void>;
+  onLock(locked: boolean): void;
+  onNote(note?: string): void;
   onTagSelectedItems(tagInfo: TagInfo): void;
   onMoveSelectedItems(store: DimStore): void;
 }) {
-  const tagItems = bulkItemTags.map((tagInfo) => ({
-    id: tagInfo.label,
-    content: t(tagInfo.label),
-    onItemSelect: () => onTagSelectedItems(tagInfo)
+  const tagItems: Option[] = bulkItemTags.map((tagInfo) => ({
+    key: tagInfo.label,
+    content: (
+      <>
+        {tagInfo.icon && <AppIcon icon={tagInfo.icon} />} {t(tagInfo.label)}
+      </>
+    ),
+    onSelected: () => onTagSelectedItems(tagInfo),
   }));
 
-  const moveItems = stores.map((store) => ({
-    id: store.id,
-    content: store.name,
-    onItemSelect: () => onMoveSelectedItems(store)
+  const moveItems: Option[] = stores.map((store) => ({
+    key: store.id,
+    content: (
+      <>
+        <img height="16" width="16" src={store.icon} /> {store.name}
+      </>
+    ),
+    onSelected: () => onMoveSelectedItems(store),
   }));
+
+  const noted = () => {
+    const note = prompt(t('Organizer.NotePrompt'));
+    if (note !== null) {
+      onNote(note || undefined);
+    }
+  };
 
   return (
     <div className={styles.itemActions}>
       <button
+        type="button"
         className={`dim-button ${styles.actionButton}`}
         disabled={!itemsAreSelected}
         name="lock"
-        onClick={onLock}
+        onClick={() => onLock(true)}
       >
-        Lock <AppIcon icon={lockIcon} />
+        <AppIcon icon={lockIcon} />
+        <span className={styles.label}>{t('Organizer.Lock')}</span>
       </button>
       <button
+        type="button"
         className={`dim-button ${styles.actionButton}`}
         disabled={!itemsAreSelected}
         name="unlock"
-        onClick={onLock}
+        onClick={() => onLock(false)}
       >
-        Unlock <AppIcon icon={lockIcon} />
+        <AppIcon icon={unlockedIcon} />
+        <span className={styles.label}>{t('Organizer.Unlock')}</span>
       </button>
-      <span className={styles.actionButton}>
-        <DropDown
-          buttonText={t('Organizer.BulkTag')}
-          buttonDisabled={!itemsAreSelected}
-          dropDownItems={tagItems}
-        />
-      </span>
-      <span className={styles.actionButton}>
-        <DropDown
-          buttonText={t('Organizer.BulkMove')}
-          buttonDisabled={!itemsAreSelected}
-          dropDownItems={moveItems}
-        />
-      </span>
+      <Dropdown disabled={!itemsAreSelected} options={tagItems} className={styles.actionButton}>
+        <AppIcon icon={tagIcon} />
+        <span className={styles.label}>{t('Organizer.BulkTag')}</span>
+      </Dropdown>
+      <Dropdown disabled={!itemsAreSelected} options={moveItems} className={styles.actionButton}>
+        <AppIcon icon={moveIcon} />
+        <span className={styles.label}>{t('Organizer.BulkMove')}</span>
+      </Dropdown>
+      <button
+        type="button"
+        className={`dim-button ${styles.actionButton}`}
+        disabled={!itemsAreSelected}
+        name="note"
+        onClick={noted}
+      >
+        <AppIcon icon={stickyNoteIcon} />
+        <span className={styles.label}>{t('Organizer.Note')}</span>
+      </button>
+      <span className={styles.tip}> {t('Organizer.ShiftTip')}</span>
     </div>
   );
 }

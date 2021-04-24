@@ -31,15 +31,32 @@
 .compare-item-header {
   display: flex;
   flex-direction: row;
+  align-items: center;
+  > div {
+    padding: 0;
+  }
+}
+
+.compare-initial-item {
+  color: $orange;
+  font-weight: bold;
 }
 
 .compare-options {
-  button {
+  display: flex;
+  flex-wrap: wrap;
+  .dim-button {
     margin-bottom: 4px;
-    margin-right: 3px;
+    &:nth-last-child(n + 2) {
+      margin-right: 3px;
+    }
   }
-  .sheet & {
-    padding-right: 48px;
+}
+
+.organizer-link {
+  margin-left: auto;
+  @include phone-portrait {
+    margin-left: 0;
   }
 }
 
@@ -47,23 +64,17 @@
   flex: 1;
   white-space: nowrap;
   overflow-x: scroll;
+  touch-action: pan-x;
   display: flex;
   flex-direction: row;
   justify-content: flex-start;
   overscroll-behavior: contain;
-  -webkit-overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   contain: content;
 }
 
 .compare-item {
   border-left: 1px solid rgba(245, 245, 245, 0.25);
-
-  .comp-lock-icon .app-icon {
-    font-size: 12px;
-    margin: 0 5px 0 2px;
-    vertical-align: middle;
-  }
 
   .item {
     float: right;
@@ -103,16 +114,8 @@
   .range {
     font-size: 0.9em;
   }
-  .item-tag-selector {
-    flex: 1;
-    height: 18px;
-    background: rgba(255, 255, 255, 0.2);
-    border: none;
-    color: white;
-    width: 120px;
-  }
   .spacer {
-    height: 39px;
+    height: 46px;
   }
 
   span > .app-icon,
@@ -126,10 +129,14 @@
     display: none;
   }
 
+  .sockets > * {
+    margin-bottom: 8px;
+  }
+
   .socket-container {
     img {
-      width: calc(0.5 * var(--item-size));
-      height: calc(0.5 * var(--item-size));
+      width: 26px;
+      height: 26px;
     }
   }
 
@@ -175,4 +182,13 @@
 .item-pop {
   animation: 0.25s linear 2 alternate pop;
   z-index: 1;
+}
+
+.horizontal {
+  display: inline-block;
+  margin-right: 5px;
+  cursor: default;
+  input {
+    vertical-align: middle;
+  }
 }

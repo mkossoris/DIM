@@ -1,19 +1,10 @@
-import React from 'react';
-import { Raid } from './Raid';
-import { DestinyMilestone, DestinyProfileResponse } from 'bungie-api-ts/destiny2';
-import _ from 'lodash';
 import { D2ManifestDefinitions } from 'app/destiny2/d2-definitions';
 import { DimStore } from 'app/inventory/store-types';
-
-// unfortunately the API's raid .order attribute is odd
-const raidOrder = [
-  3660836525, // levi
-  2986584050, // eow
-  2683538554, // sos
-  3181387331, // wish
-  1342567285, // scourge
-  2590427074 // crown
-];
+import { RAID_ACTIVITY_TYPE_HASH, RAID_MILESTONE_HASHES } from 'app/search/d2-known-values';
+import { DestinyMilestone, DestinyProfileResponse } from 'bungie-api-ts/destiny2';
+import _ from 'lodash';
+import React from 'react';
+import { Raid } from './Raid';
 
 /**
  * Displays all of the raids available to a user as milestones
@@ -22,7 +13,7 @@ const raidOrder = [
 export default function Raids({
   store,
   defs,
-  profileInfo
+  profileInfo,
 }: {
   store: DimStore;
   defs: D2ManifestDefinitions;
@@ -33,23 +24,20 @@ export default function Raids({
     ? Object.values(profileMilestoneData)
     : [];
 
-  // filter to milestones with child activities of type <ActivityType "Raid" 2043403989>
+  // filter to milestones with child activities that are raids
   const filteredMilestones = allMilestones.filter((milestone) => {
-    const milestoneActivities = (defs.Milestone.get(milestone.milestoneHash) || {}).activities;
+    const milestoneActivities = defs.Milestone.get(milestone.milestoneHash).activities;
     return (
-      milestoneActivities &&
-      milestoneActivities.some(
+      RAID_MILESTONE_HASHES.includes(milestone.milestoneHash) ||
+      milestoneActivities?.some(
         (activity) =>
-          (defs.Activity.get(activity.activityHash) || {}).activityTypeHash === 2043403989
+          defs.Activity.get(activity.activityHash)?.activityTypeHash === RAID_ACTIVITY_TYPE_HASH
+        // prefer to use DestinyActivityModeType.Raid, but it appears inconsistently in activity defs
       )
     );
   });
 
-  const raids = _.sortBy(filteredMilestones, (f) => {
-    const order = raidOrder.indexOf(f.milestoneHash);
-    // return reverse order by index
-    return order >= 0 ? -order : -999 - f.order;
-  });
+  const raids = _.sortBy(filteredMilestones, (f) => f.order);
 
   return (
     <div className="progress-for-character" key={store.id}>

@@ -2,8 +2,10 @@
 // Please do not change this file!
 interface CssExports {
   'button': string;
+  'buttonItemCount': string;
   'checked': string;
   'level': string;
+  'selected': string;
   'selector': string;
 }
 export const cssExports: CssExports;

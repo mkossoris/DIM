@@ -11,6 +11,11 @@
   grid-column: 2;
   text-align: right !important;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  > svg {
+    vertical-align: middle;
+    margin-left: 4px;
+  }
 }
 
 .icon {
@@ -19,6 +24,7 @@
     height: 12px;
     width: 12px;
     vertical-align: bottom;
+    filter: drop-shadow(0 0 0 white);
   }
 }
 
@@ -67,6 +73,12 @@
 }
 .moddedStatBar {
   background-color: $blue;
+  & + .moddedStatBar {
+    background-color: adjust-color($blue, $lightness: -10);
+    & + .moddedStatBar {
+      background-color: adjust-color($blue, $lightness: -20);
+    }
+  }
 }
 
 .masterworked {
@@ -83,6 +95,13 @@
   }
 }
 
+.negativeModded {
+  color: $red;
+  .statName {
+    font-weight: bold;
+  }
+}
+
 .totalRow {
   padding-top: 4px;
 }
@@ -94,12 +113,31 @@
 .totalStatDetailed {
   margin-left: 8px;
   grid-column: -2 / -1;
+}
 
-  .totalStatModded {
-    color: $blue;
-  }
+.totalStatModded {
+  color: $blue;
+}
 
-  .totalStatMasterwork {
-    color: $orange;
+.totalStatNegativeModded {
+  color: $red;
+}
+
+.totalStatMasterwork {
+  color: $orange;
+}
+
+.totalStatWarn {
+  color: yellow;
+  margin-left: 8px;
+}
+
+.smallStatToggle {
+  grid-column: -3 / -1;
+  margin-left: 4px;
+  img {
+    height: 12px !important;
+    width: 12px !important;
+    vertical-align: bottom;
   }
 }

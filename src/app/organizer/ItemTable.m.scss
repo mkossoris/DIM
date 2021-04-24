@@ -1,103 +1,115 @@
 @import '../variables';
 
-.tableContainer {
-  width: 100%;
-  overflow-x: auto;
+// stacking rules
+
+$dropdown-menu: 10;
+$toolbar: 9;
+$header-cells: 7;
+$content-cells: 5;
+
+:root {
+  --table-header-height: 30px;
+  --item-table-toolbar-height: 0;
 }
 
 .table {
-  min-width: 100%;
-  border-spacing: 0;
+  min-width: 1270px;
+  display: grid;
+  margin: 8px 0 16px 0 !important;
 
-  td,
-  th {
-    padding: 4px 6px;
-    vertical-align: top;
-    text-align: left;
-  }
-
-  th {
-    vertical-align: bottom !important;
-  }
-
-  td {
-    padding-top: calc(var(--item-size) * 0.75 * 0.5 - 6px);
-  }
-
-  thead {
-    img {
-      height: 16px;
-      width: 16px;
-    }
-
-    tr:first-child {
-      td,
-      th {
-        text-align: center;
-      }
-    }
-
-    tr:last-child {
-      td,
-      th {
-        border-bottom: 1px solid #ddd;
-      }
-    }
-  }
-
-  tbody {
-    tr {
-      &:nth-child(2n) {
-        background-color: rgba(255, 255, 255, 0.1);
-      }
-    }
+  > div {
+    padding: 4px 8px;
+    padding-top: calc(var(--item-size) * 0.75 * 0.5 - 4px);
+    background-color: #27263a;
   }
 }
 
-.mods,
-.perks,
-.archetype {
-  padding-top: calc(var(--item-size) * 0.5 * 0.5 - 5px) !important;
+.toolbar {
+  grid-column: 1 / -1;
+  position: sticky;
+  z-index: $toolbar;
+  box-sizing: border-box;
+
+  top: var(--header-height);
+  padding: 8px 8px !important;
+
+  border-bottom: none !important;
+  > div {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    position: sticky;
+    left: 4px;
+    width: 98vw;
+    @include horizontal-space-children(4px);
+  }
+}
+
+.importButton {
+  @media (max-width: 1000px) {
+    display: none;
+  }
+}
+
+// Column headers
+.header {
+  vertical-align: bottom;
+  text-align: left;
+  border-bottom: 1px solid #ddd !important;
+  background: #313233;
+  position: sticky;
+  z-index: $header-cells;
+
+  top: calc(var(--header-height) + var(--item-table-toolbar-height));
+  white-space: nowrap;
+  padding-top: 4px !important;
+
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end !important;
+
+  img {
+    height: 16px;
+    width: 16px;
+    vertical-align: bottom;
+  }
+}
+
+.sorter {
+  margin-left: 2px;
+}
+
+[role='cell'] {
+  z-index: $content-cells;
+}
+
+.alternateRow {
+  background-color: #464748 !important;
 }
 
 .name {
   font-weight: bold;
   white-space: nowrap;
-}
-
-.notes,
-.wishListNote {
-  width: 10%;
+  &.header {
+    font-weight: normal;
+  }
 }
 
 .archetype {
-  width: 1px;
   white-space: nowrap;
 }
 
-.mods {
-  width: 100px;
-}
-
-.selection,
-.name,
-.dmg,
-.power,
-.tag,
-.wishList,
-.rating,
-.reacquireable,
-.tier,
-.source,
-.year,
-.season,
-.event {
-  width: 1px;
-}
-
 .selection {
-  padding-left: 2px !important;
+  padding-left: 8px !important;
   padding-right: 2px !important;
+  min-width: 20px;
+  left: 0;
+  position: sticky;
+  top: calc(var(--header-height) + var(--table-header-height) + var(--item-table-toolbar-height));
+  &.header {
+    top: calc(var(--header-height) + var(--item-table-toolbar-height));
+  }
+  z-index: $header-cells;
 }
 
 .rating {
@@ -109,20 +121,45 @@
 .locked,
 .tag,
 .wishList,
-.dmg {
+.energy,
+.dmg,
+.year,
+.season,
+.customstat {
   text-align: center !important;
+}
+
+.dmg {
+  padding-top: calc(var(--item-size) * 0.75 * 0.5 - 2px) !important;
+  &.header {
+    padding-top: 4px !important;
+  }
+}
+
+.new {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  > div {
+    position: static !important;
+  }
 }
 
 .icon {
   padding-top: 4px !important;
-  width: calc(var(--item-size) * 0.75);
-  img {
-    display: block;
-    width: calc(var(--item-size) * 0.75);
-    height: calc(var(--item-size) * 0.75);
-    box-sizing: border-box;
-    pointer-events: none;
-    border: 1px solid #ddd;
+  min-width: calc(var(--item-size) * 0.75);
+  left: 30px;
+  position: sticky;
+  top: calc(var(--header-height) + var(--table-header-height) + var(--item-table-toolbar-height));
+  &.header {
+    top: calc(var(--header-height) + var(--item-table-toolbar-height));
+    padding-top: 0;
+  }
+  z-index: $header-cells;
+  --icon-item-size: calc(var(--item-size) * 0.75);
+  > :global(.item) {
+    --item-size: var(--icon-item-size) !important;
+    height: var(--item-size);
   }
 }
 
@@ -140,35 +177,118 @@
   color: #d14334;
 }
 
-.modPerks {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-  gap: 4px;
+.perks,
+.traits {
+  padding-top: calc(var(--item-size) * 0.5 * 0.5 - 5px) !important;
 }
-
-.modPerk {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  img {
-    margin-right: 4px;
-    height: calc(var(--item-size) * 0.5);
-    width: calc(var(--item-size) * 0.5);
-    flex-shrink: 0;
+.perks {
+  columns: 2;
+  @include vertical-space-children(4px);
+  column-gap: 8px;
+  &.header {
+    display: flex;
+    flex-direction: column;
+  }
+}
+.traits {
+  visibility: visible;
+  .modPerks {
+    flex: 0;
+    min-width: 160px;
+    flex-basis: 160px;
   }
 }
 
-.modSlot {
-  height: calc(var(--item-size) * 0.5);
-  width: calc(var(--item-size) * 0.5);
+.modPerks {
+  break-inside: avoid;
+  display: grid;
+  gap: 4px;
+  padding-left: 5px;
+}
+
+.isPerk {
+  border-left: 2px solid #888;
+  padding-left: 3px;
+}
+
+// Perks in the perk/mod columns
+.modPerk {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+}
+.miniPerkContainer {
+  position: relative;
+  contain: layout paint style;
+  box-sizing: border-box;
+  height: 18px;
+  width: 18px;
+  --item-size: 18px;
+  margin-right: 3px;
+  margin-left: -1px;
+  flex-shrink: 0;
+}
+.perkSelected {
+  font-weight: bold;
+}
+
+.locationCell,
+.killTrackerDisplay {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  white-space: nowrap;
+  img {
+    margin-right: 4px;
+    height: 16px;
+    width: 16px;
+  }
+}
+
+.stat_2715839340 {
+  svg {
+    circle {
+      fill: black;
+    }
+  }
+}
+
+$modslotSize: 30px;
+.modslot {
+  display: flex;
+  justify-content: center;
+  padding-top: calc((((var(--item-size) * 0.75) - #{$modslotSize}) / 2) + 4px) !important;
+}
+.modslotIcon {
+  height: $modslotSize;
+  width: $modslotSize;
+  margin: 0 1px;
+}
+
+.loadouts {
+  > div {
+    > div {
+      white-space: nowrap;
+    }
+  }
 }
 
 // Indicate cells that can be filtered on shift-click
 .shiftHeld {
   .hasFilter {
-    background-color: #6666ff;
     &:hover {
-      background-color: #3333ff;
+      background-color: #999 !important;
+      cursor: pointer;
     }
   }
+}
+
+.noItems {
+  text-align: center;
+  grid-column: 1 / -1;
+  padding: 2em !important;
+}
+
+.itemIcon {
+  cursor: pointer;
 }
